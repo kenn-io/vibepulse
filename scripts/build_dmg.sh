@@ -103,7 +103,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>SUFeedURL</key>
   <string>https://github.com/wesm/vibepulse/releases/latest/download/appcast.xml</string>
   <key>SUPublicEDKey</key>
-  <string>__SPARKLE_ED_PUBLIC_KEY__</string>
+  <string>cEYWDZYALSBQ23f4ttD75PSjVqpUIj4atr+vCFnH2M0=</string>
   <key>SUEnableAutomaticChecks</key>
   <true/>
   <key>SUScheduledCheckInterval</key>
