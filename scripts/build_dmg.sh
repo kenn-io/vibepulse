@@ -54,6 +54,14 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <string>13.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>SUFeedURL</key>
+  <string>https://github.com/wesm/vibepulse/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>__SPARKLE_ED_PUBLIC_KEY__</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUScheduledCheckInterval</key>
+  <integer>86400</integer>
 </dict>
 </plist>
 PLIST
