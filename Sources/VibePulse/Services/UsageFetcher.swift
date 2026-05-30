@@ -47,8 +47,26 @@ final class UsageFetcher: @unchecked Sendable {
     process.standardError = errorPipe
 
     try process.run()
-    let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+    // Drain both pipes concurrently. Reading stdout to EOF before stderr
+    // deadlocks once the child writes more than the pipe buffer (~64 KB on
+    // macOS) to stderr — agentsview's full-resync progress output after a
+    // dataVersion bump exceeds that and would otherwise hang the refresh
+    // until the app is relaunched.
+    var data = Data()
+    var errorData = Data()
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+      data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+      group.leave()
+    }
+    group.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+      errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+      group.leave()
+    }
+    group.wait()
     process.waitUntilExit()
 
     guard process.terminationStatus == 0 else {
