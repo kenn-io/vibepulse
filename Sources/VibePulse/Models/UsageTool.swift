@@ -4,6 +4,7 @@ enum UsageTool: String, CaseIterable, Identifiable {
   case claude
   case codex
   case pi
+  case gemini
   case openCode = "opencode"
 
   var id: String { rawValue }
@@ -16,6 +17,8 @@ enum UsageTool: String, CaseIterable, Identifiable {
       return "Codex"
     case .pi:
       return "Pi"
+    case .gemini:
+      return "Gemini"
     case .openCode:
       return "OpenCode"
     }
@@ -29,6 +32,8 @@ enum UsageTool: String, CaseIterable, Identifiable {
       return "Codex"
     case .pi:
       return "Pi"
+    case .gemini:
+      return "Gemini"
     case .openCode:
       return "OpenCode"
     }
@@ -42,6 +47,8 @@ enum UsageTool: String, CaseIterable, Identifiable {
       return Color(red: 0.19, green: 0.58, blue: 0.78)
     case .pi:
       return Color(red: 0.43, green: 0.68, blue: 0.25)
+    case .gemini:
+      return Color(red: 0.91, green: 0.54, blue: 0.18)
     case .openCode:
       return Color(red: 0.55, green: 0.36, blue: 0.78)
     }
@@ -55,6 +62,8 @@ enum UsageTool: String, CaseIterable, Identifiable {
       return ["agentsview", "usage", "daily", "--json", "--agent", "codex"]
     case .pi:
       return ["agentsview", "usage", "daily", "--json", "--agent", "pi"]
+    case .gemini:
+      return ["agentsview", "usage", "daily", "--json", "--agent", "gemini"]
     case .openCode:
       return ["agentsview", "usage", "daily", "--json", "--agent", "opencode"]
     }

@@ -9,6 +9,7 @@ struct SettingsView: View {
         Toggle("Claude Code", isOn: $model.includeClaude)
         Toggle("Codex", isOn: $model.includeCodex)
         Toggle("Pi", isOn: $model.includePi)
+        Toggle("Gemini", isOn: $model.includeGemini)
         Toggle("OpenCode", isOn: $model.includeOpenCode)
       }
 
