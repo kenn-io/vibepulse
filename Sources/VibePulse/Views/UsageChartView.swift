@@ -186,6 +186,7 @@ struct UsageChartView: View {
       UsageTool.claude.displayName: UsageTool.claude.color,
       UsageTool.codex.displayName: UsageTool.codex.color,
       UsageTool.pi.displayName: UsageTool.pi.color,
+      UsageTool.gemini.displayName: UsageTool.gemini.color,
       UsageTool.openCode.displayName: UsageTool.openCode.color,
     ]
   }

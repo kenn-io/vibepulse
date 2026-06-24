@@ -57,6 +57,13 @@ final class AppModel: ObservableObject {
     }
   }
 
+  @Published var includeGemini: Bool {
+    didSet {
+      defaults.set(includeGemini, forKey: DefaultsKey.includeGemini)
+      reloadFromStore()
+    }
+  }
+
   @Published var includeOpenCode: Bool {
     didSet {
       defaults.set(includeOpenCode, forKey: DefaultsKey.includeOpenCode)
@@ -83,6 +90,7 @@ final class AppModel: ObservableObject {
     includeClaude = defaults.object(forKey: DefaultsKey.includeClaude) as? Bool ?? true
     includeCodex = defaults.object(forKey: DefaultsKey.includeCodex) as? Bool ?? true
     includePi = defaults.object(forKey: DefaultsKey.includePi) as? Bool ?? true
+    includeGemini = defaults.object(forKey: DefaultsKey.includeGemini) as? Bool ?? true
     includeOpenCode = defaults.object(forKey: DefaultsKey.includeOpenCode) as? Bool ?? true
     let storedInterval = defaults.string(forKey: DefaultsKey.refreshInterval)
     if let storedInterval, let interval = RefreshInterval(rawValue: storedInterval) {
@@ -186,6 +194,8 @@ final class AppModel: ObservableObject {
         return includeCodex
       case .pi:
         return includePi
+      case .gemini:
+        return includeGemini
       case .openCode:
         return includeOpenCode
       }
@@ -349,6 +359,7 @@ final class AppModel: ObservableObject {
     static let includeClaude = "includeClaude"
     static let includeCodex = "includeCodex"
     static let includePi = "includePi"
+    static let includeGemini = "includeGemini"
     static let includeOpenCode = "includeOpenCode"
     static let refreshMinutes = "refreshMinutes"
     static let refreshInterval = "refreshInterval"
