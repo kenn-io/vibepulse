@@ -32,17 +32,11 @@ struct UsageChartView: View {
             y: .value("Cost", point.cost)
           )
           .interpolationMethod(.catmullRom)
-          .foregroundStyle(by: .value("Tool", point.tool.displayName))
-
-          PointMark(
-            x: .value("Time", point.date),
-            y: .value("Cost", point.cost)
-          )
-          .foregroundStyle(by: .value("Tool", point.tool.displayName))
-          .opacity(0.6)
+          .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+          .foregroundStyle(by: .value("Series", point.series.displayName))
         }
         .chartLegend(.hidden)
-        .chartForegroundStyleScale(colorScale)
+        .chartForegroundStyleScale(domain: colorDomain, range: colorRange)
         .chartYAxis {
           AxisMarks(position: .leading) { value in
             AxisGridLine()
@@ -80,14 +74,14 @@ struct UsageChartView: View {
                 x: .value("Date", point.date, unit: .day),
                 y: .value("Cost", point.cost)
               )
-              .foregroundStyle(by: .value("Tool", point.tool.displayName))
-              .position(by: .value("Tool", point.tool.displayName))
+              .foregroundStyle(by: .value("Series", point.series.displayName))
+              .position(by: .value("Series", point.series.displayName))
             } else {
               BarMark(
                 x: .value("Date", point.date, unit: .day),
                 y: .value("Cost", point.cost)
               )
-              .foregroundStyle(by: .value("Tool", point.tool.displayName))
+              .foregroundStyle(by: .value("Series", point.series.displayName))
             }
           }
 
@@ -98,7 +92,7 @@ struct UsageChartView: View {
           }
         }
         .chartLegend(.hidden)
-        .chartForegroundStyleScale(colorScale)
+        .chartForegroundStyleScale(domain: colorDomain, range: colorRange)
         .chartYAxis {
           AxisMarks(position: .leading) { value in
             AxisGridLine()
@@ -143,11 +137,7 @@ struct UsageChartView: View {
     return
       dailySeries
       .filter { calendar.isDate($0.date, inSameDayAs: dailyHoverDate) }
-      .sorted { toolOrder($0.tool) < toolOrder($1.tool) }
-  }
-
-  private func toolOrder(_ tool: UsageTool) -> Int {
-    UsageTool.allCases.firstIndex(of: tool) ?? 0
+      .sorted { $0.series.sortKey < $1.series.sortKey }
   }
 
   private func updateDailyHover(_ location: CGPoint?, proxy: ChartProxy, geo: GeometryProxy) {
@@ -181,14 +171,17 @@ struct UsageChartView: View {
     }
   }
 
-  private var colorScale: KeyValuePairs<String, Color> {
-    [
-      UsageTool.claude.displayName: UsageTool.claude.color,
-      UsageTool.codex.displayName: UsageTool.codex.color,
-      UsageTool.pi.displayName: UsageTool.pi.color,
-      UsageTool.gemini.displayName: UsageTool.gemini.color,
-      UsageTool.openCode.displayName: UsageTool.openCode.color,
-    ]
+  private var chartSeries: [UsageSeriesKey] {
+    let series = (cumulativeSeries + dailySeries).map(\.series)
+    return Array(Set(series)).sorted { $0.sortKey < $1.sortKey }
+  }
+
+  private var colorDomain: [String] {
+    chartSeries.map(\.displayName)
+  }
+
+  private var colorRange: [Color] {
+    chartSeries.map(\.color)
   }
 }
 
@@ -205,9 +198,9 @@ private struct DailyTooltipView: View {
       ForEach(points) { point in
         HStack(spacing: 6) {
           Circle()
-            .fill(point.tool.color)
+            .fill(point.series.color)
             .frame(width: 8, height: 8)
-          Text(point.tool.displayName)
+          Text(point.series.displayName)
           Spacer(minLength: 8)
           Text(Formatters.currencyString(point.cost))
         }

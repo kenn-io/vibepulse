@@ -5,24 +5,20 @@ struct MenuContentView: View {
   @EnvironmentObject private var model: AppModel
   @EnvironmentObject private var updaterController: UpdaterController
   @State private var chartMode: ChartMode = .today
+  @State private var aggregationMode: UsageAggregationMode = .agent
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
       totalSection
-      Picker("View", selection: $chartMode) {
-        ForEach(ChartMode.allCases) { mode in
-          Text(mode.title).tag(mode)
-        }
-      }
-      .pickerStyle(.segmented)
+      selectorControls
 
       Text(chartMode == .today ? "Cumulative" : "By Day")
         .font(.caption)
         .foregroundColor(.secondary)
 
       UsageChartView(
-        mode: chartMode, cumulativeSeries: model.cumulativeSeries, dailySeries: visibleDailySeries)
+        mode: chartMode, cumulativeSeries: selectedCumulativeSeries, dailySeries: visibleDailySeries)
 
       totalsBreakdown
 
@@ -43,6 +39,38 @@ struct MenuContentView: View {
       disableWindowResizing()
       model.refreshNow()
     }
+  }
+
+  private var selectorControls: some View {
+    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+      GridRow {
+        selectorLabel("View")
+        Picker("View", selection: $chartMode) {
+          ForEach(ChartMode.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+      }
+
+      GridRow {
+        selectorLabel("Group")
+        Picker("Group", selection: $aggregationMode) {
+          ForEach(UsageAggregationMode.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+      }
+    }
+  }
+
+  private func selectorLabel(_ title: String) -> some View {
+    Text(title)
+      .font(.headline)
+      .gridColumnAlignment(.leading)
   }
 
   private var header: some View {
@@ -141,7 +169,8 @@ struct MenuContentView: View {
   private var combinedTotalText: String {
     switch chartMode {
     case .today:
-      return model.menuTotalText
+      let total = selectedTotals.reduce(0) { $0 + $1.totalCost }
+      return Formatters.currencyString(total)
     case .sevenDays, .thirtyDays:
       let total = visibleDailySeries.reduce(0) { $0 + $1.cost }
       return Formatters.currencyString(total)
@@ -151,32 +180,60 @@ struct MenuContentView: View {
   private var combinedTotalSubtitle: String {
     switch chartMode {
     case .today:
-      return "Combined today via agentsview"
+      return "Combined today by \(aggregationMode.title.lowercased()) via agentsview"
     case .sevenDays:
-      return "Combined (last 7 days) via agentsview"
+      return "Combined (last 7 days) by \(aggregationMode.title.lowercased())"
     case .thirtyDays:
-      return "Combined (last 30 days) via agentsview"
+      return "Combined (last 30 days) by \(aggregationMode.title.lowercased())"
     }
   }
 
   private var toolBreakdown: [ToolTotal] {
     switch chartMode {
     case .today:
-      return model.toolTotals.filter { $0.totalCost > 0.0001 }
+      return selectedTotals.filter { $0.totalCost > 0.0001 }
     case .sevenDays, .thirtyDays:
-      var totalsByTool: [UsageTool: Double] = [:]
+      var totalsBySeries: [UsageSeriesKey: Double] = [:]
       for point in visibleDailySeries {
-        totalsByTool[point.tool, default: 0] += point.cost
+        totalsBySeries[point.series, default: 0] += point.cost
       }
-      return UsageTool.allCases.compactMap { tool in
-        guard let total = totalsByTool[tool], total > 0.0001 else { return nil }
-        return ToolTotal(tool: tool, totalCost: total)
+      return totalsBySeries.compactMap { series, total in
+        guard total > 0.0001 else { return nil }
+        return ToolTotal(series: series, totalCost: total)
       }
+      .sorted { $0.series.sortKey < $1.series.sortKey }
+    }
+  }
+
+  private var selectedCumulativeSeries: [UsageSeriesPoint] {
+    switch aggregationMode {
+    case .agent:
+      return model.cumulativeSeries
+    case .model:
+      return model.modelCumulativeSeries
+    }
+  }
+
+  private var selectedDailySeries: [UsageSeriesPoint] {
+    switch aggregationMode {
+    case .agent:
+      return model.dailySeries
+    case .model:
+      return model.modelDailySeries
+    }
+  }
+
+  private var selectedTotals: [ToolTotal] {
+    switch aggregationMode {
+    case .agent:
+      return model.toolTotals
+    case .model:
+      return model.modelTotals
     }
   }
 
   private var visibleDailySeries: [UsageSeriesPoint] {
-    UsageSeriesFilters.visibleDailySeries(model.dailySeries, mode: chartMode)
+    UsageSeriesFilters.visibleDailySeries(selectedDailySeries, mode: chartMode)
   }
 }
 
@@ -186,12 +243,12 @@ private struct ToolTotalLegendItem: View {
   var body: some View {
     HStack(alignment: .top, spacing: 6) {
       Circle()
-        .fill(total.tool.color)
+        .fill(total.series.color)
         .frame(width: 8, height: 8)
         .padding(.top, 4)
 
       VStack(alignment: .leading, spacing: 1) {
-        Text(total.tool.displayName)
+        Text(total.series.displayName)
           .lineLimit(1)
           .minimumScaleFactor(0.85)
         Text(Formatters.currencyString(total.totalCost))
