@@ -44,26 +44,35 @@ final class UsageStore: @unchecked Sendable {
 
   func upsertDailyTotals(tool: UsageTool, totals: [DailyTotal]) throws {
     try queue.sync {
-      let sql = """
-        INSERT INTO daily_rollups (date_key, tool, total_cost, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(date_key, tool) DO UPDATE SET
-        total_cost = excluded.total_cost,
-        updated_at = excluded.updated_at;
-        """
-      let updatedAt = Date().timeIntervalSince1970
-      for total in totals {
-        try withStatement(sql) { statement in
-          bindText(statement, index: 1, value: total.dateKey)
-          bindText(statement, index: 2, value: tool.rawValue)
-          sqlite3_bind_double(statement, 3, total.cost)
-          sqlite3_bind_double(statement, 4, updatedAt)
-          if sqlite3_step(statement) != SQLITE_DONE {
-            throw StoreError.executeFailed(errorMessage)
+      do {
+        try execute("BEGIN IMMEDIATE TRANSACTION;")
+        let sql = """
+          INSERT INTO daily_rollups (date_key, tool, total_cost, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(date_key, tool) DO UPDATE SET
+          total_cost = excluded.total_cost,
+          updated_at = excluded.updated_at;
+          """
+        let updatedAt = Date().timeIntervalSince1970
+        for total in totals {
+          try withStatement(sql) { statement in
+            bindText(statement, index: 1, value: total.dateKey)
+            bindText(statement, index: 2, value: tool.rawValue)
+            sqlite3_bind_double(statement, 3, total.cost)
+            sqlite3_bind_double(statement, 4, updatedAt)
+            if sqlite3_step(statement) != SQLITE_DONE {
+              throw StoreError.executeFailed(errorMessage)
+            }
           }
+
+          try upsertModelDailyTotals(
+            tool: tool, dateKey: total.dateKey, totals: total.modelBreakdowns)
         }
 
-        try upsertModelDailyTotals(tool: tool, dateKey: total.dateKey, totals: total.modelBreakdowns)
+        try execute("COMMIT;")
+      } catch {
+        try? execute("ROLLBACK;")
+        throw error
       }
     }
   }
@@ -627,6 +636,10 @@ final class UsageStore: @unchecked Sendable {
     dateKey: String,
     totals: [DailyModelBreakdown]
   ) throws {
+    let deleteSQL = """
+      DELETE FROM model_daily_rollups
+      WHERE date_key = ? AND tool = ?;
+      """
     let sql = """
       INSERT INTO model_daily_rollups (date_key, tool, model_name, total_cost, updated_at)
       VALUES (?, ?, ?, ?, ?)
@@ -635,6 +648,13 @@ final class UsageStore: @unchecked Sendable {
       updated_at = excluded.updated_at;
       """
     let updatedAt = Date().timeIntervalSince1970
+    try withStatement(deleteSQL) { statement in
+      bindText(statement, index: 1, value: dateKey)
+      bindText(statement, index: 2, value: tool.rawValue)
+      if sqlite3_step(statement) != SQLITE_DONE {
+        throw StoreError.executeFailed(errorMessage)
+      }
+    }
     for total in totals {
       try withStatement(sql) { statement in
         bindText(statement, index: 1, value: dateKey)
