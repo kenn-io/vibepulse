@@ -155,15 +155,14 @@ final class AppModel: ObservableObject {
         do {
           let totals = try fetcher.fetchDailyTotals(for: tool)
           try store.upsertDailyTotals(tool: tool, totals: totals)
-          if let todayTotal = totals.first(where: { $0.dateKey == todayKey }) {
+          if let todayTotal = totals.first(where: {
+            DateHelper.normalizedDateKey(from: $0.dateKey) == todayKey
+          }) {
             try store.insertSample(tool: tool, totalCost: todayTotal.cost, recordedAt: sampleTime)
-            for modelTotal in todayTotal.modelBreakdowns {
-              try store.insertModelSample(
-                tool: tool,
-                modelName: modelTotal.modelName,
-                totalCost: modelTotal.cost,
-                recordedAt: sampleTime)
-            }
+            try store.insertModelSamplesForRefresh(
+              tool: tool,
+              modelBreakdowns: todayTotal.modelBreakdowns,
+              recordedAt: sampleTime)
           }
         } catch {
           errors.append("\(tool.displayName): \(error.localizedDescription)")
@@ -329,6 +328,7 @@ final class AppModel: ObservableObject {
         let deltaUpdated = try store.backfillSampleDeltas()
         let dateUpdated = try UsageTool.allCases.reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
+            + (try store.normalizeModelDailyRollupDates(for: tool))
         }
         let message =
           "Maintenance complete. Updated \(deltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
