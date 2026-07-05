@@ -93,6 +93,37 @@ final class UsageStoreTests: XCTestCase {
     XCTAssertEqual(rollups.map(\.totalCost), [10.75])
   }
 
+  func testUpsertDailyTotalsPreservesModelRollupsWhenBreakdownUnavailable() throws {
+    let store = try UsageStore(path: ":memory:")
+
+    try store.upsertDailyTotals(
+      tool: .claude,
+      totals: [
+        DailyTotal(
+          dateKey: "2026-07-02",
+          cost: 12.5,
+          modelBreakdowns: [
+            DailyModelBreakdown(modelName: "claude-fable-5", cost: 10.25),
+            DailyModelBreakdown(modelName: "claude-haiku-4-5-20251001", cost: 2.25),
+          ])
+      ])
+
+    try store.upsertDailyTotals(
+      tool: .claude,
+      totals: [
+        DailyTotal(dateKey: "2026-07-02", cost: 14)
+      ])
+
+    let rollups = store.fetchModelDailyRollups(since: "2026-07-01", tools: [.claude])
+    XCTAssertEqual(
+      rollups.map(\.modelName),
+      [
+        "claude-fable-5",
+        "claude-haiku-4-5-20251001",
+      ])
+    XCTAssertEqual(rollups.map(\.totalCost), [10.25, 2.25])
+  }
+
   func testUpsertDailyTotalsNormalizesModelRollupDateKeysBeforeReplacing() throws {
     let store = try UsageStore(path: ":memory:")
 

@@ -202,9 +202,9 @@ struct DailyModelBreakdown {
 struct DailyTotal {
   let dateKey: String
   let cost: Double
-  let modelBreakdowns: [DailyModelBreakdown]
+  let modelBreakdowns: [DailyModelBreakdown]?
 
-  init(dateKey: String, cost: Double, modelBreakdowns: [DailyModelBreakdown] = []) {
+  init(dateKey: String, cost: Double, modelBreakdowns: [DailyModelBreakdown]? = nil) {
     self.dateKey = dateKey
     self.cost = cost
     self.modelBreakdowns = modelBreakdowns

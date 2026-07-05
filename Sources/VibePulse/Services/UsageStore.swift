@@ -66,8 +66,10 @@ final class UsageStore: @unchecked Sendable {
             }
           }
 
-          try upsertModelDailyTotals(
-            tool: tool, dateKey: dateKey, totals: total.modelBreakdowns)
+          if let modelBreakdowns = total.modelBreakdowns {
+            try upsertModelDailyTotals(
+              tool: tool, dateKey: dateKey, totals: modelBreakdowns)
+          }
         }
 
         try execute("COMMIT;")

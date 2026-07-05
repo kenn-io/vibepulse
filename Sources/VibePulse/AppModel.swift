@@ -159,10 +159,12 @@ final class AppModel: ObservableObject {
             DateHelper.normalizedDateKey(from: $0.dateKey) == todayKey
           }) {
             try store.insertSample(tool: tool, totalCost: todayTotal.cost, recordedAt: sampleTime)
-            try store.insertModelSamplesForRefresh(
-              tool: tool,
-              modelBreakdowns: todayTotal.modelBreakdowns,
-              recordedAt: sampleTime)
+            if let modelBreakdowns = todayTotal.modelBreakdowns {
+              try store.insertModelSamplesForRefresh(
+                tool: tool,
+                modelBreakdowns: modelBreakdowns,
+                recordedAt: sampleTime)
+            }
           }
         } catch {
           errors.append("\(tool.displayName): \(error.localizedDescription)")
