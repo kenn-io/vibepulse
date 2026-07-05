@@ -24,7 +24,7 @@ fi
 DMG_SIZE=$(stat -f%z "$DMG_PATH")
 DMG_SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 PUB_DATE=$(date -u '+%a, %d %b %Y %H:%M:%S %z')
-DMG_URL="https://github.com/wesm/vibepulse/releases/download/v${VERSION}/${APP_NAME}-${VERSION}.dmg"
+DMG_URL="https://github.com/kenn-io/vibepulse/releases/download/v${VERSION}/${APP_NAME}-${VERSION}.dmg"
 
 # --- EdDSA signature ---
 SIGN_UPDATE=$(find "$BUILD_DIR/artifacts" -name sign_update \
@@ -94,7 +94,7 @@ cat > "$DIST_DIR/appcast.xml" <<APPCAST
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>${APP_NAME}</title>
-    <link>https://github.com/wesm/vibepulse</link>
+    <link>https://github.com/kenn-io/vibepulse</link>
     <description>${APP_NAME} release feed</description>
     <language>en</language>
     <item>

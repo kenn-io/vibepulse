@@ -218,9 +218,9 @@ Expected: seven rows with the names above.
    git push origin v0.2.0
    ```
 1. Watch the run: `gh run watch` or
-   [actions page](https://github.com/wesm/vibepulse/actions/workflows/release.yml).
+   [actions page](https://github.com/kenn-io/vibepulse/actions/workflows/release.yml).
 1. On success, the release appears at
-   [Releases](https://github.com/wesm/vibepulse/releases) with the DMG and
+   [Releases](https://github.com/kenn-io/vibepulse/releases) with the DMG and
    `SHA256SUMS` attached.
 
 ## Key rotation
