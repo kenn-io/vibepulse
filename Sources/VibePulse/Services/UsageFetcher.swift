@@ -17,7 +17,7 @@ final class UsageFetcher: @unchecked Sendable {
     for attempt in 1...maxAttempts {
       do {
         let data = try runCommand(tool.dailyCommand)
-        return try parseDailyTotals(data: data)
+        return try Self.parseDailyTotals(data: data)
       } catch FetchError.agentsviewNotFound(let path) {
         throw FetchError.agentsviewNotFound(path)
       } catch {
@@ -165,7 +165,7 @@ final class UsageFetcher: @unchecked Sendable {
     return combined
   }
 
-  private func parseDailyTotals(data: Data) throws -> [DailyTotal] {
+  static func parseDailyTotals(data: Data) throws -> [DailyTotal] {
     if let text = String(data: data, encoding: .utf8),
       text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     {
@@ -191,11 +191,26 @@ final class UsageFetcher: @unchecked Sendable {
       guard let cost = parseNumber(row["totalCost"]) else {
         return nil
       }
-      return DailyTotal(dateKey: dateKey, cost: cost)
+      let modelBreakdowns = parseModelBreakdowns(row["modelBreakdowns"])
+      return DailyTotal(dateKey: dateKey, cost: cost, modelBreakdowns: modelBreakdowns)
     }
   }
 
-  private func parseNumber(_ value: Any?) -> Double? {
+  private static func parseModelBreakdowns(_ value: Any?) -> [DailyModelBreakdown]? {
+    guard let value else { return nil }
+    guard let rows = value as? [[String: Any]] else { return nil }
+    return rows.compactMap { row in
+      guard let modelName = row["modelName"] as? String, !modelName.isEmpty else {
+        return nil
+      }
+      guard let cost = parseNumber(row["cost"]) else {
+        return nil
+      }
+      return DailyModelBreakdown(modelName: modelName, cost: cost)
+    }
+  }
+
+  private static func parseNumber(_ value: Any?) -> Double? {
     if let doubleValue = value as? Double {
       return doubleValue
     }

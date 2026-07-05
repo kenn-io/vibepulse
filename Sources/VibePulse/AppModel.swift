@@ -8,6 +8,9 @@ final class AppModel: ObservableObject {
   @Published var cumulativeSeries: [UsageSeriesPoint] = []
   @Published var dailySeries: [UsageSeriesPoint] = []
   @Published var toolTotals: [ToolTotal] = []
+  @Published var modelCumulativeSeries: [UsageSeriesPoint] = []
+  @Published var modelDailySeries: [UsageSeriesPoint] = []
+  @Published var modelTotals: [ToolTotal] = []
   @Published var lastUpdated: Date?
   @Published var statusMessage: String?
   @Published var isRefreshing = false
@@ -146,13 +149,22 @@ final class AppModel: ObservableObject {
 
     DispatchQueue.global(qos: .background).async { [fetcher, store] in
       var errors: [String] = []
+      let sampleTime = Date()
 
       for tool in tools {
         do {
           let totals = try fetcher.fetchDailyTotals(for: tool)
           try store.upsertDailyTotals(tool: tool, totals: totals)
-          if let todayTotal = totals.first(where: { $0.dateKey == todayKey }) {
-            try store.insertSample(tool: tool, totalCost: todayTotal.cost, recordedAt: Date())
+          if let todayTotal = totals.first(where: {
+            DateHelper.normalizedDateKey(from: $0.dateKey) == todayKey
+          }) {
+            try store.insertSample(tool: tool, totalCost: todayTotal.cost, recordedAt: sampleTime)
+            if let modelBreakdowns = todayTotal.modelBreakdowns {
+              try store.insertModelSamplesForRefresh(
+                tool: tool,
+                modelBreakdowns: modelBreakdowns,
+                recordedAt: sampleTime)
+            }
           }
         } catch {
           errors.append("\(tool.displayName): \(error.localizedDescription)")
@@ -232,6 +244,9 @@ final class AppModel: ObservableObject {
 
     cumulativeSeries = cumulativePoints.sorted { $0.date < $1.date }
 
+    let modelSamples = store.fetchModelSamples(tools: tools, from: startOfDay, to: now)
+    modelCumulativeSeries = UsageSeriesAggregation.cumulativeModelSeries(from: modelSamples)
+
     let sinceKey = DateHelper.dateKeyDaysAgo(29)
     let rollups = store.fetchDailyRollups(since: sinceKey)
     dailySeries = rollups.compactMap { rollup in
@@ -240,6 +255,9 @@ final class AppModel: ObservableObject {
       }
       return UsageSeriesPoint(tool: rollup.tool, date: date, cost: rollup.totalCost)
     }
+
+    let modelRollups = store.fetchModelDailyRollups(since: sinceKey, tools: tools)
+    modelDailySeries = aggregateModelDailySeries(modelRollups)
 
     let todayKey = DateHelper.dateKey(for: Date())
     var totals: [ToolTotal] = []
@@ -250,8 +268,50 @@ final class AppModel: ObservableObject {
       totals.append(ToolTotal(tool: tool, totalCost: totalCost))
     }
     toolTotals = totals
+    modelTotals = aggregateModelTotals(modelRollups, todayKey: todayKey)
     let combined = totals.reduce(0) { $0 + $1.totalCost }
     menuTotalText = Formatters.currencyString(combined)
+  }
+
+  private func aggregateModelDailySeries(_ rollups: [ModelDailyRollup]) -> [UsageSeriesPoint] {
+    var totalsByDateAndModel: [ModelDailyKey: Double] = [:]
+    for rollup in rollups {
+      let key = ModelDailyKey(dateKey: rollup.dateKey, modelName: rollup.modelName)
+      totalsByDateAndModel[key, default: 0] += rollup.totalCost
+    }
+
+    return totalsByDateAndModel.compactMap { key, totalCost in
+      guard let date = DateHelper.date(fromKey: key.dateKey) else {
+        return nil
+      }
+      return UsageSeriesPoint(series: .model(key.modelName), date: date, cost: totalCost)
+    }
+    .sorted {
+      if $0.date == $1.date {
+        return $0.series.sortKey < $1.series.sortKey
+      }
+      return $0.date < $1.date
+    }
+  }
+
+  private func aggregateModelTotals(
+    _ rollups: [ModelDailyRollup],
+    todayKey: String
+  ) -> [ToolTotal] {
+    var totalsByModel: [String: Double] = [:]
+    for rollup in rollups where rollup.dateKey == todayKey {
+      totalsByModel[rollup.modelName, default: 0] += rollup.totalCost
+    }
+
+    return totalsByModel.map { modelName, totalCost in
+      ToolTotal(series: .model(modelName), totalCost: totalCost)
+    }
+    .sorted { $0.series.sortKey < $1.series.sortKey }
+  }
+
+  private struct ModelDailyKey: Hashable {
+    let dateKey: String
+    let modelName: String
   }
 
   func runMaintenance(force: Bool = false) {
@@ -270,6 +330,7 @@ final class AppModel: ObservableObject {
         let deltaUpdated = try store.backfillSampleDeltas()
         let dateUpdated = try UsageTool.allCases.reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
+            + (try store.normalizeModelDailyRollupDates(for: tool))
         }
         let message =
           "Maintenance complete. Updated \(deltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
