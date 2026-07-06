@@ -5,16 +5,16 @@ enum UsageSeriesAggregation {
     let samplesByModel = Dictionary(grouping: samples) { $0.modelName }
 
     return samplesByModel.flatMap { modelName, samples in
-      var latestByTool: [UsageTool: Double] = [:]
       let samplesByDate = Dictionary(grouping: samples) { $0.recordedAt }
       let dates = samplesByDate.keys.sorted()
+      var runningTotal = 0.0
 
       return dates.map { date in
-        for sample in samplesByDate[date, default: []] {
-          latestByTool[sample.tool] = sample.totalCost
+        let deltaCost = samplesByDate[date, default: []].reduce(0) { total, sample in
+          total + max(0, sample.deltaCost)
         }
-        let totalCost = latestByTool.values.reduce(0, +)
-        return UsageSeriesPoint(series: .model(modelName), date: date, cost: totalCost)
+        runningTotal += deltaCost
+        return UsageSeriesPoint(series: .model(modelName), date: date, cost: runningTotal)
       }
     }
     .sorted {

@@ -34,4 +34,35 @@ final class UsageSeriesAggregationTests: XCTestCase {
     XCTAssertEqual(points.map(\.date), [start, later])
     XCTAssertEqual(points.map(\.cost), [5, 8])
   }
+
+  func testCumulativeModelSeriesDoesNotDropWhenModelResetsToZero() {
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2, hour: 10))!
+    let later = calendar.date(byAdding: .hour, value: 1, to: start)!
+    let samples = [
+      ModelUsageSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        recordedAt: start,
+        totalCost: 2,
+        deltaCost: 2),
+      ModelUsageSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        recordedAt: later,
+        totalCost: 0,
+        deltaCost: 0),
+    ]
+
+    let points = UsageSeriesAggregation.cumulativeModelSeries(from: samples)
+
+    XCTAssertEqual(
+      points.map(\.series.displayName),
+      [
+        "claude-haiku-4-5-20251001",
+        "claude-haiku-4-5-20251001",
+      ])
+    XCTAssertEqual(points.map(\.date), [start, later])
+    XCTAssertEqual(points.map(\.cost), [2, 2])
+  }
 }

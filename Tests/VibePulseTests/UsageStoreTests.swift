@@ -242,6 +242,34 @@ final class UsageStoreTests: XCTestCase {
     XCTAssertEqual(samples[2].deltaCost, 5, accuracy: 0.001)
   }
 
+  func testBackfillModelSampleDeltasIsScopedByAgentModelAndDate() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let second = calendar.date(byAdding: .minute, value: 30, to: start)!
+
+    do {
+      let store = try UsageStore(path: path)
+      try store.insertModelSample(
+        tool: .claude, modelName: "shared-model", totalCost: 10, recordedAt: first)
+      try store.insertModelSample(
+        tool: .codex, modelName: "shared-model", totalCost: 4, recordedAt: first)
+      try store.insertModelSample(
+        tool: .claude, modelName: "shared-model", totalCost: 15, recordedAt: second)
+    }
+
+    try updateRawModelSampleDeltas(path: path, deltaCost: 0)
+
+    let store = try UsageStore(path: path)
+    let updatedCount = try store.backfillModelSampleDeltas()
+    let samples = store.fetchModelSamples(tools: [.claude, .codex], from: start, to: second)
+
+    XCTAssertEqual(updatedCount, 3)
+    XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
+  }
+
   private func insertRawModelDailyRollup(
     path: String,
     dateKey: String,
@@ -273,5 +301,32 @@ final class UsageStoreTests: XCTestCase {
     guard sqlite3_step(statement) == SQLITE_DONE else {
       throw NSError(domain: "UsageStoreTests", code: 3)
     }
+  }
+
+  private func updateRawModelSampleDeltas(path: String, deltaCost: Double) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 4)
+    }
+    defer { sqlite3_close(db) }
+
+    let sql = "UPDATE model_samples SET delta_cost = ?;"
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 5)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    sqlite3_bind_double(statement, 1, deltaCost)
+    guard sqlite3_step(statement) == SQLITE_DONE else {
+      throw NSError(domain: "UsageStoreTests", code: 6)
+    }
+  }
+
+  private func temporaryStorePath() -> String {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("vibepulse-\(UUID().uuidString)")
+      .appendingPathExtension("sqlite")
+    return url.path
   }
 }

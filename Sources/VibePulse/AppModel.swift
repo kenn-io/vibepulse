@@ -328,12 +328,13 @@ final class AppModel: ObservableObject {
     DispatchQueue.global(qos: .background).async { [store] in
       do {
         let deltaUpdated = try store.backfillSampleDeltas()
+        let modelDeltaUpdated = try store.backfillModelSampleDeltas()
         let dateUpdated = try UsageTool.allCases.reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
             + (try store.normalizeModelDailyRollupDates(for: tool))
         }
         let message =
-          "Maintenance complete. Updated \(deltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
+          "Maintenance complete. Updated \(deltaUpdated + modelDeltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
         let now = Date()
         DispatchQueue.main.async {
           self.maintenanceMessage = message

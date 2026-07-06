@@ -432,6 +432,80 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
+  func backfillModelSampleDeltas() throws -> Int {
+    try queue.sync {
+      do {
+        try execute("BEGIN IMMEDIATE TRANSACTION;")
+
+        let selectSQL = """
+          SELECT id, tool, model_name, date_key, total_cost, delta_cost
+          FROM model_samples
+          ORDER BY tool, model_name, date_key, recorded_at ASC;
+          """
+
+        let updateSQL = "UPDATE model_samples SET delta_cost = ? WHERE id = ?;"
+
+        var updatedCount = 0
+        var previousTool: String?
+        var previousModelName: String?
+        var previousDateKey: String?
+        var previousTotal: Double = 0
+
+        var updateStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStatement, nil) == SQLITE_OK else {
+          throw StoreError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(updateStatement) }
+
+        try withStatement(selectSQL) { statement in
+          while sqlite3_step(statement) == SQLITE_ROW {
+            let sampleId = sqlite3_column_int(statement, 0)
+            guard let toolCString = sqlite3_column_text(statement, 1),
+              let modelNameCString = sqlite3_column_text(statement, 2),
+              let dateKeyCString = sqlite3_column_text(statement, 3)
+            else {
+              continue
+            }
+            let toolRaw = String(cString: toolCString)
+            let modelName = String(cString: modelNameCString)
+            let dateKey = String(cString: dateKeyCString)
+            let totalCost = sqlite3_column_double(statement, 4)
+            let existingDelta = sqlite3_column_double(statement, 5)
+
+            if toolRaw != previousTool || modelName != previousModelName
+              || dateKey != previousDateKey
+            {
+              previousTool = toolRaw
+              previousModelName = modelName
+              previousDateKey = dateKey
+              previousTotal = 0
+            }
+
+            let newDelta = max(0, totalCost - previousTotal)
+            if abs(newDelta - existingDelta) > 0.0001 {
+              sqlite3_reset(updateStatement)
+              sqlite3_clear_bindings(updateStatement)
+              sqlite3_bind_double(updateStatement, 1, newDelta)
+              sqlite3_bind_int(updateStatement, 2, sampleId)
+              if sqlite3_step(updateStatement) != SQLITE_DONE {
+                throw StoreError.executeFailed(errorMessage)
+              }
+              updatedCount += 1
+            }
+
+            previousTotal = totalCost
+          }
+        }
+
+        try execute("COMMIT;")
+        return updatedCount
+      } catch {
+        try? execute("ROLLBACK;")
+        throw error
+      }
+    }
+  }
+
   func normalizeDailyRollupDates(for tool: UsageTool) throws -> Int {
     try queue.sync {
       do {
@@ -700,6 +774,7 @@ final class UsageStore: @unchecked Sendable {
     try execute(createModelSamples)
     try execute(createModelSamplesIndex)
     try ensureSampleDeltaColumn()
+    try ensureModelSampleDeltaColumn()
   }
 
   private func execute(_ sql: String) throws {
@@ -938,6 +1013,25 @@ final class UsageStore: @unchecked Sendable {
     }
     if !hasDelta {
       try execute("ALTER TABLE samples ADD COLUMN delta_cost REAL NOT NULL DEFAULT 0;")
+    }
+  }
+
+  private func ensureModelSampleDeltaColumn() throws {
+    let sql = "PRAGMA table_info(model_samples);"
+    var hasDelta = false
+    try withStatement(sql) { statement in
+      while sqlite3_step(statement) == SQLITE_ROW {
+        if let nameCString = sqlite3_column_text(statement, 1) {
+          let name = String(cString: nameCString)
+          if name == "delta_cost" {
+            hasDelta = true
+            break
+          }
+        }
+      }
+    }
+    if !hasDelta {
+      try execute("ALTER TABLE model_samples ADD COLUMN delta_cost REAL NOT NULL DEFAULT 0;")
     }
   }
 }
