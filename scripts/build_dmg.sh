@@ -104,7 +104,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key>
   <true/>
   <key>SUFeedURL</key>
-  <string>https://github.com/wesm/vibepulse/releases/latest/download/appcast.xml</string>
+  <string>https://github.com/kenn-io/vibepulse/releases/latest/download/appcast.xml</string>
   <key>SUPublicEDKey</key>
   <string>cEYWDZYALSBQ23f4ttD75PSjVqpUIj4atr+vCFnH2M0=</string>
   <key>SUEnableAutomaticChecks</key>
