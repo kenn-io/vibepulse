@@ -220,6 +220,47 @@ final class UsageStoreTests: XCTestCase {
     XCTAssertEqual(samples.map(\.deltaCost), [10, 2, 2, 0])
   }
 
+  func testModelSampleDeltaIgnoresResetThenReappearBelowPreviousHighWaterMark() throws {
+    let store = try UsageStore(path: ":memory:")
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let reset = calendar.date(byAdding: .minute, value: 30, to: start)!
+    let reappearSameTotal = calendar.date(byAdding: .minute, value: 45, to: start)!
+    let reappearHigherTotal = calendar.date(byAdding: .minute, value: 60, to: start)!
+
+    try store.insertModelSamplesForRefresh(
+      tool: .claude,
+      modelBreakdowns: [
+        DailyModelBreakdown(modelName: "claude-haiku-4-5-20251001", cost: 2)
+      ],
+      recordedAt: first)
+
+    try store.insertModelSamplesForRefresh(
+      tool: .claude,
+      modelBreakdowns: [],
+      recordedAt: reset)
+
+    try store.insertModelSamplesForRefresh(
+      tool: .claude,
+      modelBreakdowns: [
+        DailyModelBreakdown(modelName: "claude-haiku-4-5-20251001", cost: 2)
+      ],
+      recordedAt: reappearSameTotal)
+
+    try store.insertModelSamplesForRefresh(
+      tool: .claude,
+      modelBreakdowns: [
+        DailyModelBreakdown(modelName: "claude-haiku-4-5-20251001", cost: 5)
+      ],
+      recordedAt: reappearHigherTotal)
+
+    let samples = store.fetchModelSamples(tools: [.claude], from: start, to: reappearHigherTotal)
+
+    XCTAssertEqual(samples.map(\.totalCost), [2, 0, 2, 5])
+    XCTAssertEqual(samples.map(\.deltaCost), [2, 0, 0, 3])
+  }
+
   func testModelSampleDeltaCalculationIsScopedByAgentAndModel() throws {
     let store = try UsageStore(path: ":memory:")
     let calendar = Calendar.current
@@ -268,6 +309,51 @@ final class UsageStoreTests: XCTestCase {
 
     XCTAssertEqual(updatedCount, 3)
     XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
+  }
+
+  func testBackfillModelSampleDeltasIgnoresResetThenReappearBelowPreviousHighWaterMark() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let reset = calendar.date(byAdding: .minute, value: 30, to: start)!
+    let reappearSameTotal = calendar.date(byAdding: .minute, value: 45, to: start)!
+    let reappearHigherTotal = calendar.date(byAdding: .minute, value: 60, to: start)!
+
+    do {
+      let store = try UsageStore(path: path)
+      try store.insertModelSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        totalCost: 2,
+        recordedAt: first)
+      try store.insertModelSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        totalCost: 0,
+        recordedAt: reset)
+      try store.insertModelSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        totalCost: 2,
+        recordedAt: reappearSameTotal)
+      try store.insertModelSample(
+        tool: .claude,
+        modelName: "claude-haiku-4-5-20251001",
+        totalCost: 5,
+        recordedAt: reappearHigherTotal)
+    }
+
+    try updateRawModelSampleDeltas(path: path, deltaCosts: [2, 0, 2, 3])
+
+    let store = try UsageStore(path: path)
+    let updatedCount = try store.backfillModelSampleDeltas()
+    let samples = store.fetchModelSamples(tools: [.claude], from: start, to: reappearHigherTotal)
+
+    XCTAssertEqual(updatedCount, 1)
+    XCTAssertEqual(samples.map(\.totalCost), [2, 0, 2, 5])
+    XCTAssertEqual(samples.map(\.deltaCost), [2, 0, 0, 3])
   }
 
   func testMigrationBackfillsLegacyModelSampleDeltas() throws {
@@ -342,6 +428,46 @@ final class UsageStoreTests: XCTestCase {
     sqlite3_bind_double(statement, 1, deltaCost)
     guard sqlite3_step(statement) == SQLITE_DONE else {
       throw NSError(domain: "UsageStoreTests", code: 6)
+    }
+  }
+
+  private func updateRawModelSampleDeltas(path: String, deltaCosts: [Double]) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 11)
+    }
+    defer { sqlite3_close(db) }
+
+    let selectSQL = "SELECT id FROM model_samples ORDER BY recorded_at ASC;"
+    var selectStatement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStatement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 12)
+    }
+    defer { sqlite3_finalize(selectStatement) }
+
+    var ids: [Int32] = []
+    while sqlite3_step(selectStatement) == SQLITE_ROW {
+      ids.append(sqlite3_column_int(selectStatement, 0))
+    }
+    guard ids.count == deltaCosts.count else {
+      throw NSError(domain: "UsageStoreTests", code: 13)
+    }
+
+    let updateSQL = "UPDATE model_samples SET delta_cost = ? WHERE id = ?;"
+    var updateStatement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStatement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 14)
+    }
+    defer { sqlite3_finalize(updateStatement) }
+
+    for (id, deltaCost) in zip(ids, deltaCosts) {
+      sqlite3_reset(updateStatement)
+      sqlite3_clear_bindings(updateStatement)
+      sqlite3_bind_double(updateStatement, 1, deltaCost)
+      sqlite3_bind_int(updateStatement, 2, id)
+      guard sqlite3_step(updateStatement) == SQLITE_DONE else {
+        throw NSError(domain: "UsageStoreTests", code: 15)
+      }
     }
   }
 

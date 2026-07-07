@@ -449,7 +449,7 @@ final class UsageStore: @unchecked Sendable {
         var previousTool: String?
         var previousModelName: String?
         var previousDateKey: String?
-        var previousTotal: Double = 0
+        var previousMaxTotal: Double = 0
 
         var updateStatement: OpaquePointer?
         guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStatement, nil) == SQLITE_OK else {
@@ -478,10 +478,10 @@ final class UsageStore: @unchecked Sendable {
               previousTool = toolRaw
               previousModelName = modelName
               previousDateKey = dateKey
-              previousTotal = 0
+              previousMaxTotal = 0
             }
 
-            let newDelta = max(0, totalCost - previousTotal)
+            let newDelta = max(0, totalCost - previousMaxTotal)
             if abs(newDelta - existingDelta) > 0.0001 {
               sqlite3_reset(updateStatement)
               sqlite3_clear_bindings(updateStatement)
@@ -493,7 +493,7 @@ final class UsageStore: @unchecked Sendable {
               updatedCount += 1
             }
 
-            previousTotal = totalCost
+            previousMaxTotal = max(previousMaxTotal, totalCost)
           }
         }
 
@@ -919,7 +919,7 @@ final class UsageStore: @unchecked Sendable {
       """
     let dateKey = DateHelper.dateKey(for: recordedAt)
     let previousTotal =
-      try latestModelSampleCost(for: dateKey, tool: tool, modelName: modelName) ?? 0
+      try maxModelSampleCost(for: dateKey, tool: tool, modelName: modelName) ?? 0
     let deltaCost = max(0, totalCost - previousTotal)
     try withStatement(sql) { statement in
       bindText(statement, index: 1, value: tool.rawValue)
@@ -972,23 +972,24 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func latestModelSampleCost(
+  private func maxModelSampleCost(
     for dateKey: String,
     tool: UsageTool,
     modelName: String
   ) throws -> Double? {
     let sql = """
-      SELECT total_cost
+      SELECT MAX(total_cost)
       FROM model_samples
       WHERE date_key = ? AND tool = ? AND model_name = ?
-      ORDER BY recorded_at DESC
-      LIMIT 1;
       """
     return try withStatement(sql) { statement in
       bindText(statement, index: 1, value: dateKey)
       bindText(statement, index: 2, value: tool.rawValue)
       bindText(statement, index: 3, value: modelName)
       if sqlite3_step(statement) == SQLITE_ROW {
+        guard sqlite3_column_type(statement, 0) != SQLITE_NULL else {
+          return nil
+        }
         return sqlite3_column_double(statement, 0)
       }
       return nil
