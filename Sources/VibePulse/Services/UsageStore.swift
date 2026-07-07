@@ -432,6 +432,80 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
+  func backfillModelSampleDeltas() throws -> Int {
+    try queue.sync {
+      do {
+        try execute("BEGIN IMMEDIATE TRANSACTION;")
+
+        let selectSQL = """
+          SELECT id, tool, model_name, date_key, total_cost, delta_cost
+          FROM model_samples
+          ORDER BY tool, model_name, date_key, recorded_at ASC;
+          """
+
+        let updateSQL = "UPDATE model_samples SET delta_cost = ? WHERE id = ?;"
+
+        var updatedCount = 0
+        var previousTool: String?
+        var previousModelName: String?
+        var previousDateKey: String?
+        var previousMaxTotal: Double = 0
+
+        var updateStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStatement, nil) == SQLITE_OK else {
+          throw StoreError.prepareFailed(errorMessage)
+        }
+        defer { sqlite3_finalize(updateStatement) }
+
+        try withStatement(selectSQL) { statement in
+          while sqlite3_step(statement) == SQLITE_ROW {
+            let sampleId = sqlite3_column_int(statement, 0)
+            guard let toolCString = sqlite3_column_text(statement, 1),
+              let modelNameCString = sqlite3_column_text(statement, 2),
+              let dateKeyCString = sqlite3_column_text(statement, 3)
+            else {
+              continue
+            }
+            let toolRaw = String(cString: toolCString)
+            let modelName = String(cString: modelNameCString)
+            let dateKey = String(cString: dateKeyCString)
+            let totalCost = sqlite3_column_double(statement, 4)
+            let existingDelta = sqlite3_column_double(statement, 5)
+
+            if toolRaw != previousTool || modelName != previousModelName
+              || dateKey != previousDateKey
+            {
+              previousTool = toolRaw
+              previousModelName = modelName
+              previousDateKey = dateKey
+              previousMaxTotal = 0
+            }
+
+            let newDelta = max(0, totalCost - previousMaxTotal)
+            if abs(newDelta - existingDelta) > 0.0001 {
+              sqlite3_reset(updateStatement)
+              sqlite3_clear_bindings(updateStatement)
+              sqlite3_bind_double(updateStatement, 1, newDelta)
+              sqlite3_bind_int(updateStatement, 2, sampleId)
+              if sqlite3_step(updateStatement) != SQLITE_DONE {
+                throw StoreError.executeFailed(errorMessage)
+              }
+              updatedCount += 1
+            }
+
+            previousMaxTotal = max(previousMaxTotal, totalCost)
+          }
+        }
+
+        try execute("COMMIT;")
+        return updatedCount
+      } catch {
+        try? execute("ROLLBACK;")
+        throw error
+      }
+    }
+  }
+
   func normalizeDailyRollupDates(for tool: UsageTool) throws -> Int {
     try queue.sync {
       do {
@@ -700,6 +774,9 @@ final class UsageStore: @unchecked Sendable {
     try execute(createModelSamples)
     try execute(createModelSamplesIndex)
     try ensureSampleDeltaColumn()
+    if try ensureModelSampleDeltaColumn() {
+      _ = try backfillModelSampleDeltas()
+    }
   }
 
   private func execute(_ sql: String) throws {
@@ -842,7 +919,7 @@ final class UsageStore: @unchecked Sendable {
       """
     let dateKey = DateHelper.dateKey(for: recordedAt)
     let previousTotal =
-      try latestModelSampleCost(for: dateKey, tool: tool, modelName: modelName) ?? 0
+      try maxModelSampleCost(for: dateKey, tool: tool, modelName: modelName) ?? 0
     let deltaCost = max(0, totalCost - previousTotal)
     try withStatement(sql) { statement in
       bindText(statement, index: 1, value: tool.rawValue)
@@ -895,23 +972,24 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func latestModelSampleCost(
+  private func maxModelSampleCost(
     for dateKey: String,
     tool: UsageTool,
     modelName: String
   ) throws -> Double? {
     let sql = """
-      SELECT total_cost
+      SELECT MAX(total_cost)
       FROM model_samples
       WHERE date_key = ? AND tool = ? AND model_name = ?
-      ORDER BY recorded_at DESC
-      LIMIT 1;
       """
     return try withStatement(sql) { statement in
       bindText(statement, index: 1, value: dateKey)
       bindText(statement, index: 2, value: tool.rawValue)
       bindText(statement, index: 3, value: modelName)
       if sqlite3_step(statement) == SQLITE_ROW {
+        guard sqlite3_column_type(statement, 0) != SQLITE_NULL else {
+          return nil
+        }
         return sqlite3_column_double(statement, 0)
       }
       return nil
@@ -939,5 +1017,26 @@ final class UsageStore: @unchecked Sendable {
     if !hasDelta {
       try execute("ALTER TABLE samples ADD COLUMN delta_cost REAL NOT NULL DEFAULT 0;")
     }
+  }
+
+  private func ensureModelSampleDeltaColumn() throws -> Bool {
+    let sql = "PRAGMA table_info(model_samples);"
+    var hasDelta = false
+    try withStatement(sql) { statement in
+      while sqlite3_step(statement) == SQLITE_ROW {
+        if let nameCString = sqlite3_column_text(statement, 1) {
+          let name = String(cString: nameCString)
+          if name == "delta_cost" {
+            hasDelta = true
+            break
+          }
+        }
+      }
+    }
+    if !hasDelta {
+      try execute("ALTER TABLE model_samples ADD COLUMN delta_cost REAL NOT NULL DEFAULT 0;")
+      return true
+    }
+    return false
   }
 }
