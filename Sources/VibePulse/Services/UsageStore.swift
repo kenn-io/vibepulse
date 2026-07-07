@@ -774,7 +774,9 @@ final class UsageStore: @unchecked Sendable {
     try execute(createModelSamples)
     try execute(createModelSamplesIndex)
     try ensureSampleDeltaColumn()
-    try ensureModelSampleDeltaColumn()
+    if try ensureModelSampleDeltaColumn() {
+      _ = try backfillModelSampleDeltas()
+    }
   }
 
   private func execute(_ sql: String) throws {
@@ -1016,7 +1018,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func ensureModelSampleDeltaColumn() throws {
+  private func ensureModelSampleDeltaColumn() throws -> Bool {
     let sql = "PRAGMA table_info(model_samples);"
     var hasDelta = false
     try withStatement(sql) { statement in
@@ -1032,6 +1034,8 @@ final class UsageStore: @unchecked Sendable {
     }
     if !hasDelta {
       try execute("ALTER TABLE model_samples ADD COLUMN delta_cost REAL NOT NULL DEFAULT 0;")
+      return true
     }
+    return false
   }
 }

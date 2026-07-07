@@ -270,6 +270,28 @@ final class UsageStoreTests: XCTestCase {
     XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
   }
 
+  func testMigrationBackfillsLegacyModelSampleDeltas() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let second = calendar.date(byAdding: .minute, value: 30, to: start)!
+
+    try createLegacyModelSamples(
+      path: path,
+      samples: [
+        (.claude, "shared-model", first, 10),
+        (.codex, "shared-model", first, 4),
+        (.claude, "shared-model", second, 15),
+      ])
+
+    let store = try UsageStore(path: path)
+    let samples = store.fetchModelSamples(tools: [.claude, .codex], from: start, to: second)
+
+    XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
+  }
+
   private func insertRawModelDailyRollup(
     path: String,
     dateKey: String,
@@ -320,6 +342,56 @@ final class UsageStoreTests: XCTestCase {
     sqlite3_bind_double(statement, 1, deltaCost)
     guard sqlite3_step(statement) == SQLITE_DONE else {
       throw NSError(domain: "UsageStoreTests", code: 6)
+    }
+  }
+
+  private func createLegacyModelSamples(
+    path: String,
+    samples: [(UsageTool, String, Date, Double)]
+  ) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
+    else {
+      throw NSError(domain: "UsageStoreTests", code: 7)
+    }
+    defer { sqlite3_close(db) }
+
+    let createSQL = """
+      CREATE TABLE model_samples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tool TEXT NOT NULL,
+          model_name TEXT NOT NULL,
+          recorded_at REAL NOT NULL,
+          total_cost REAL NOT NULL,
+          date_key TEXT NOT NULL
+      );
+      """
+    guard sqlite3_exec(db, createSQL, nil, nil, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 8)
+    }
+
+    let insertSQL = """
+      INSERT INTO model_samples (tool, model_name, recorded_at, total_cost, date_key)
+      VALUES (?, ?, ?, ?, ?);
+      """
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, insertSQL, -1, &statement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 9)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    for (tool, modelName, recordedAt, totalCost) in samples {
+      sqlite3_reset(statement)
+      sqlite3_clear_bindings(statement)
+      sqlite3_bind_text(statement, 1, (tool.rawValue as NSString).utf8String, -1, nil)
+      sqlite3_bind_text(statement, 2, (modelName as NSString).utf8String, -1, nil)
+      sqlite3_bind_double(statement, 3, recordedAt.timeIntervalSince1970)
+      sqlite3_bind_double(statement, 4, totalCost)
+      sqlite3_bind_text(
+        statement, 5, (DateHelper.dateKey(for: recordedAt) as NSString).utf8String, -1, nil)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw NSError(domain: "UsageStoreTests", code: 10)
+      }
     }
   }
 
