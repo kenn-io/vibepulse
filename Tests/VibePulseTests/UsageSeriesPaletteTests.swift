@@ -43,10 +43,12 @@ final class UsageSeriesPaletteTests: XCTestCase {
     XCTAssertEqual(Set(colors).count, 20)
     XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: 0x7F7F7F)))
     XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: 0xC7C7C7)))
-    XCTAssertEqual(Array(colors.suffix(2)), [
-      UsageSeriesRGB(hex: 0x393B79),
-      UsageSeriesRGB(hex: 0x5254A3),
-    ])
+    XCTAssertEqual(
+      Array(colors.suffix(2)),
+      [
+        UsageSeriesRGB(hex: 0x393B79),
+        UsageSeriesRGB(hex: 0x5254A3),
+      ])
   }
 
   func testFortySeriesUseUniqueTab20bThenGrayFreeTab20cColors() {
@@ -58,12 +60,14 @@ final class UsageSeriesPaletteTests: XCTestCase {
     for gray in [0x636363, 0x969696, 0xBDBDBD, 0xD9D9D9] as [UInt32] {
       XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: gray)))
     }
-    XCTAssertEqual(Array(colors.suffix(4)), [
-      UsageSeriesRGB(hex: 0x1F77B4),
-      UsageSeriesRGB(hex: 0xFF7F0E),
-      UsageSeriesRGB(hex: 0x2CA02C),
-      UsageSeriesRGB(hex: 0xD62728),
-    ])
+    XCTAssertEqual(
+      Array(colors.suffix(4)),
+      [
+        UsageSeriesRGB(hex: 0x1F77B4),
+        UsageSeriesRGB(hex: 0xFF7F0E),
+        UsageSeriesRGB(hex: 0x2CA02C),
+        UsageSeriesRGB(hex: 0xD62728),
+      ])
   }
 
   func testMoreThanFortySeriesCycleTheResolvedFortyColorPalette() throws {

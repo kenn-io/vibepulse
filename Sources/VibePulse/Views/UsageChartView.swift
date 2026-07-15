@@ -126,8 +126,9 @@ struct UsageChartView: View {
             DailyTooltipView(
               date: dailyHoverDate,
               points: dailyHoverPoints,
-              palette: palette)
-              .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
+              palette: palette
+            )
+            .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
           }
         }
         .frame(height: 160)
