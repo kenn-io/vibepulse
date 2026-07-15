@@ -1,5 +1,3 @@
-import SwiftUI
-
 enum UsageTool: String, CaseIterable, Identifiable {
   case claude
   case codex
@@ -41,23 +39,6 @@ enum UsageTool: String, CaseIterable, Identifiable {
       return "Gemini"
     case .openCode:
       return "OpenCode"
-    }
-  }
-
-  var color: Color {
-    switch self {
-    case .claude:
-      return Color(red: 0.86, green: 0.44, blue: 0.27)
-    case .codex:
-      return Color(red: 0.19, green: 0.58, blue: 0.78)
-    case .pi:
-      return Color(red: 0.43, green: 0.68, blue: 0.25)
-    case .omp:
-      return Color(red: 0.22, green: 0.66, blue: 0.62)
-    case .gemini:
-      return Color(red: 0.91, green: 0.54, blue: 0.18)
-    case .openCode:
-      return Color(red: 0.55, green: 0.36, blue: 0.78)
     }
   }
 

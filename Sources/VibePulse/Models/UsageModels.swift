@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 enum ChartMode: String, CaseIterable, Identifiable {
   case today
@@ -89,15 +88,6 @@ struct UsageSeriesKey: Hashable, Identifiable {
     }
   }
 
-  var color: Color {
-    switch kind {
-    case .agent:
-      return tool?.color ?? .secondary
-    case .model:
-      return Self.modelPalette[Self.paletteIndex(for: value)]
-    }
-  }
-
   var sortKey: String {
     switch kind {
     case .agent:
@@ -108,25 +98,6 @@ struct UsageSeriesKey: Hashable, Identifiable {
     }
   }
 
-  private static let modelPalette: [Color] = [
-    Color(red: 0.52, green: 0.50, blue: 0.88),
-    Color(red: 0.15, green: 0.68, blue: 0.58),
-    Color(red: 0.90, green: 0.48, blue: 0.38),
-    Color(red: 0.62, green: 0.67, blue: 0.24),
-    Color(red: 0.75, green: 0.42, blue: 0.74),
-    Color(red: 0.24, green: 0.63, blue: 0.82),
-    Color(red: 0.88, green: 0.62, blue: 0.24),
-    Color(red: 0.45, green: 0.70, blue: 0.38),
-  ]
-
-  private static func paletteIndex(for value: String) -> Int {
-    var hash: UInt64 = 14_695_981_039_346_656_037
-    for byte in value.utf8 {
-      hash ^= UInt64(byte)
-      hash = hash &* 1_099_511_628_211
-    }
-    return Int(hash % UInt64(modelPalette.count))
-  }
 }
 
 enum MaintenanceMode: String, CaseIterable, Identifiable {

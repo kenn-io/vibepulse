@@ -6,6 +6,7 @@ struct UsageChartView: View {
   let mode: ChartMode
   let cumulativeSeries: [UsageSeriesPoint]
   let dailySeries: [UsageSeriesPoint]
+  let palette: UsageSeriesPalette
 
   @State private var dailyHoverDate: Date?
   @State private var dailyTooltipPosition: CGPoint?
@@ -122,7 +123,10 @@ struct UsageChartView: View {
         }
         .overlay(alignment: .topLeading) {
           if let dailyHoverDate, !dailyHoverPoints.isEmpty, let dailyTooltipPosition {
-            DailyTooltipView(date: dailyHoverDate, points: dailyHoverPoints)
+            DailyTooltipView(
+              date: dailyHoverDate,
+              points: dailyHoverPoints,
+              palette: palette)
               .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
           }
         }
@@ -181,13 +185,14 @@ struct UsageChartView: View {
   }
 
   private var colorRange: [Color] {
-    chartSeries.map(\.color)
+    chartSeries.map(palette.color(for:))
   }
 }
 
 private struct DailyTooltipView: View {
   let date: Date
   let points: [UsageSeriesPoint]
+  let palette: UsageSeriesPalette
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -198,7 +203,7 @@ private struct DailyTooltipView: View {
       ForEach(points) { point in
         HStack(spacing: 6) {
           Circle()
-            .fill(point.series.color)
+            .fill(palette.color(for: point.series))
             .frame(width: 8, height: 8)
           Text(point.series.displayName)
           Spacer(minLength: 8)

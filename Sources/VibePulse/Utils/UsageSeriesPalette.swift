@@ -82,6 +82,11 @@ struct UsageSeriesPalette {
     return thirtyDay + todayOnly
   }
 
+  // Values and ordering are based on Matplotlib's qualitative tab10, tab20,
+  // tab20b, and tab20c colormaps:
+  // https://github.com/matplotlib/matplotlib/blob/v3.10.5/lib/matplotlib/_cm.py#L1286-L1367
+  // Gray entries are replaced with colors from the next qualitative map so
+  // every series keeps enough contrast against the chart background.
   private static let tab10 = [
     UsageSeriesRGB(hex: 0x1F77B4), UsageSeriesRGB(hex: 0xFF7F0E),
     UsageSeriesRGB(hex: 0x2CA02C), UsageSeriesRGB(hex: 0xD62728),
