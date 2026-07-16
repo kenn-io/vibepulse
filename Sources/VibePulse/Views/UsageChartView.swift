@@ -201,18 +201,24 @@ private struct DailyTooltipView: View {
         .font(.caption)
         .foregroundColor(.secondary)
 
-      ForEach(points) { point in
-        HStack(spacing: 6) {
-          Circle()
-            .fill(palette.color(for: point.series))
-            .frame(width: 8, height: 8)
-          Text(point.series.displayName)
-          Spacer(minLength: 8)
-          Text(Formatters.currencyString(point.cost))
+      if points.count > 8 {
+        ScrollView(.vertical) {
+          LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(points) { point in
+              pointRow(point)
+            }
+          }
         }
-        .font(.caption)
+        .frame(height: 150)
+      } else {
+        VStack(alignment: .leading, spacing: 6) {
+          ForEach(points) { point in
+            pointRow(point)
+          }
+        }
       }
     }
+    .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
     .padding(8)
     .background(
       RoundedRectangle(cornerRadius: 8)
@@ -224,7 +230,21 @@ private struct DailyTooltipView: View {
     )
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
-    .fixedSize()
+  }
+
+  private func pointRow(_ point: UsageSeriesPoint) -> some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(palette.color(for: point.series))
+        .frame(width: 8, height: 8)
+      Text(point.series.displayName)
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer(minLength: 8)
+      Text(Formatters.currencyString(point.cost))
+        .fixedSize()
+    }
+    .font(.caption)
   }
 }
 

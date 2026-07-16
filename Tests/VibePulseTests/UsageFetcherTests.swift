@@ -60,4 +60,26 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertNotNil(totals[1].modelBreakdowns)
     XCTAssertEqual(totals[1].modelBreakdowns?.count, 0)
   }
+
+  func testParseDailyTotalsTreatsPartiallyMalformedModelBreakdownsAsUnavailable() throws {
+    let json = """
+      {
+        "daily": [
+          {
+            "date": "2026-07-02",
+            "totalCost": 12.5,
+            "modelBreakdowns": [
+              { "modelName": "claude-fable-5", "cost": 10.25 },
+              { "modelName": "claude-haiku-4-5-20251001" }
+            ]
+          }
+        ]
+      }
+      """
+    let data = try XCTUnwrap(json.data(using: .utf8))
+
+    let totals = try UsageFetcher.parseDailyTotals(data: data)
+
+    XCTAssertNil(totals[0].modelBreakdowns)
+  }
 }

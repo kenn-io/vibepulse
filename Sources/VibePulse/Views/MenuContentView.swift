@@ -125,7 +125,19 @@ struct MenuContentView: View {
     }
   }
 
+  @ViewBuilder
   private func totalsBreakdown(palette: UsageSeriesPalette) -> some View {
+    if toolBreakdown.count > 8 {
+      ScrollView(.vertical) {
+        totalsGrid(palette: palette)
+      }
+      .frame(height: 132)
+    } else {
+      totalsGrid(palette: palette)
+    }
+  }
+
+  private func totalsGrid(palette: UsageSeriesPalette) -> some View {
     LazyVGrid(columns: legendColumns, alignment: .leading, spacing: 8) {
       ForEach(toolBreakdown) { total in
         ToolTotalLegendItem(total: total, color: palette.color(for: total.series))
@@ -264,6 +276,7 @@ private struct ToolTotalLegendItem: View {
       VStack(alignment: .leading, spacing: 1) {
         Text(total.series.displayName)
           .lineLimit(1)
+          .truncationMode(.middle)
           .minimumScaleFactor(0.85)
         Text(Formatters.currencyString(total.totalCost))
           .monospacedDigit()
