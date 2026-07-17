@@ -199,15 +199,17 @@ final class UsageFetcher: @unchecked Sendable {
   private static func parseModelBreakdowns(_ value: Any?) -> [DailyModelBreakdown]? {
     guard let value else { return nil }
     guard let rows = value as? [[String: Any]] else { return nil }
-    return rows.compactMap { row in
+    var modelBreakdowns: [DailyModelBreakdown] = []
+    for row in rows {
       guard let modelName = row["modelName"] as? String, !modelName.isEmpty else {
         return nil
       }
       guard let cost = parseNumber(row["cost"]) else {
         return nil
       }
-      return DailyModelBreakdown(modelName: modelName, cost: cost)
+      modelBreakdowns.append(DailyModelBreakdown(modelName: modelName, cost: cost))
     }
+    return modelBreakdowns
   }
 
   private static func parseNumber(_ value: Any?) -> Double? {

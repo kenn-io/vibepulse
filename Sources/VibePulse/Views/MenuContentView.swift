@@ -8,7 +8,9 @@ struct MenuContentView: View {
   @State private var aggregationMode: UsageAggregationMode = .agent
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let palette = seriesPalette
+
+    return VStack(alignment: .leading, spacing: 12) {
       header
       totalSection
       selectorControls
@@ -18,9 +20,12 @@ struct MenuContentView: View {
         .foregroundColor(.secondary)
 
       UsageChartView(
-        mode: chartMode, cumulativeSeries: selectedCumulativeSeries, dailySeries: visibleDailySeries)
+        mode: chartMode,
+        cumulativeSeries: visibleCumulativeSeries,
+        dailySeries: visibleDailySeries,
+        palette: palette)
 
-      totalsBreakdown
+      totalsBreakdown(palette: palette)
 
       if let status = model.statusMessage {
         Text(status)
@@ -120,10 +125,22 @@ struct MenuContentView: View {
     }
   }
 
-  private var totalsBreakdown: some View {
+  @ViewBuilder
+  private func totalsBreakdown(palette: UsageSeriesPalette) -> some View {
+    if toolBreakdown.count > 8 {
+      ScrollView(.vertical) {
+        totalsGrid(palette: palette)
+      }
+      .frame(height: 132)
+    } else {
+      totalsGrid(palette: palette)
+    }
+  }
+
+  private func totalsGrid(palette: UsageSeriesPalette) -> some View {
     LazyVGrid(columns: legendColumns, alignment: .leading, spacing: 8) {
       ForEach(toolBreakdown) { total in
-        ToolTotalLegendItem(total: total)
+        ToolTotalLegendItem(total: total, color: palette.color(for: total.series))
       }
     }
   }
@@ -232,6 +249,18 @@ struct MenuContentView: View {
     }
   }
 
+  private var seriesPalette: UsageSeriesPalette {
+    UsageSeriesPalette(
+      series: UsageSeriesPalette.canonicalSeries(
+        thirtyDaySeries: selectedDailySeries,
+        todayCumulativeSeries: visibleCumulativeSeries,
+        todayTotals: selectedTotals))
+  }
+
+  private var visibleCumulativeSeries: [UsageSeriesPoint] {
+    UsageSeriesFilters.visibleCumulativeSeries(selectedCumulativeSeries)
+  }
+
   private var visibleDailySeries: [UsageSeriesPoint] {
     UsageSeriesFilters.visibleDailySeries(selectedDailySeries, mode: chartMode)
   }
@@ -239,17 +268,19 @@ struct MenuContentView: View {
 
 private struct ToolTotalLegendItem: View {
   let total: ToolTotal
+  let color: Color
 
   var body: some View {
     HStack(alignment: .top, spacing: 6) {
       Circle()
-        .fill(total.series.color)
+        .fill(color)
         .frame(width: 8, height: 8)
         .padding(.top, 4)
 
       VStack(alignment: .leading, spacing: 1) {
         Text(total.series.displayName)
           .lineLimit(1)
+          .truncationMode(.middle)
           .minimumScaleFactor(0.85)
         Text(Formatters.currencyString(total.totalCost))
           .monospacedDigit()

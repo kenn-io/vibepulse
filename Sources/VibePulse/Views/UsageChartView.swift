@@ -6,6 +6,7 @@ struct UsageChartView: View {
   let mode: ChartMode
   let cumulativeSeries: [UsageSeriesPoint]
   let dailySeries: [UsageSeriesPoint]
+  let palette: UsageSeriesPalette
 
   @State private var dailyHoverDate: Date?
   @State private var dailyTooltipPosition: CGPoint?
@@ -122,8 +123,12 @@ struct UsageChartView: View {
         }
         .overlay(alignment: .topLeading) {
           if let dailyHoverDate, !dailyHoverPoints.isEmpty, let dailyTooltipPosition {
-            DailyTooltipView(date: dailyHoverDate, points: dailyHoverPoints)
-              .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
+            DailyTooltipView(
+              date: dailyHoverDate,
+              points: dailyHoverPoints,
+              palette: palette
+            )
+            .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
           }
         }
         .frame(height: 160)
@@ -181,13 +186,14 @@ struct UsageChartView: View {
   }
 
   private var colorRange: [Color] {
-    chartSeries.map(\.color)
+    chartSeries.map(palette.color(for:))
   }
 }
 
 private struct DailyTooltipView: View {
   let date: Date
   let points: [UsageSeriesPoint]
+  let palette: UsageSeriesPalette
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -195,18 +201,24 @@ private struct DailyTooltipView: View {
         .font(.caption)
         .foregroundColor(.secondary)
 
-      ForEach(points) { point in
-        HStack(spacing: 6) {
-          Circle()
-            .fill(point.series.color)
-            .frame(width: 8, height: 8)
-          Text(point.series.displayName)
-          Spacer(minLength: 8)
-          Text(Formatters.currencyString(point.cost))
+      if points.count > 8 {
+        ScrollView(.vertical) {
+          LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(points) { point in
+              pointRow(point)
+            }
+          }
         }
-        .font(.caption)
+        .frame(height: 150)
+      } else {
+        VStack(alignment: .leading, spacing: 6) {
+          ForEach(points) { point in
+            pointRow(point)
+          }
+        }
       }
     }
+    .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
     .padding(8)
     .background(
       RoundedRectangle(cornerRadius: 8)
@@ -218,7 +230,21 @@ private struct DailyTooltipView: View {
     )
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
-    .fixedSize()
+  }
+
+  private func pointRow(_ point: UsageSeriesPoint) -> some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(palette.color(for: point.series))
+        .frame(width: 8, height: 8)
+      Text(point.series.displayName)
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer(minLength: 8)
+      Text(Formatters.currencyString(point.cost))
+        .fixedSize()
+    }
+    .font(.caption)
   }
 }
 

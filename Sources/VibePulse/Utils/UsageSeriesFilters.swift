@@ -3,6 +3,14 @@ import Foundation
 enum UsageSeriesFilters {
   static let minimumVisibleCost = 0.0001
 
+  static func visibleCumulativeSeries(_ points: [UsageSeriesPoint]) -> [UsageSeriesPoint] {
+    let visibleSeries = Set(
+      points.lazy
+        .filter { $0.cost > minimumVisibleCost }
+        .map(\.series))
+    return points.filter { visibleSeries.contains($0.series) }
+  }
+
   static func visibleDailySeries(_ points: [UsageSeriesPoint], mode: ChartMode)
     -> [UsageSeriesPoint]
   {
