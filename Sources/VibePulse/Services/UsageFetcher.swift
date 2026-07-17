@@ -192,7 +192,12 @@ final class UsageFetcher: @unchecked Sendable {
         return nil
       }
       let modelBreakdowns = parseModelBreakdowns(row["modelBreakdowns"])
-      return DailyTotal(dateKey: dateKey, cost: cost, modelBreakdowns: modelBreakdowns)
+      let machineBreakdowns = parseMachineBreakdowns(row["machineBreakdowns"])
+      return DailyTotal(
+        dateKey: dateKey,
+        cost: cost,
+        modelBreakdowns: modelBreakdowns,
+        machineBreakdowns: machineBreakdowns)
     }
   }
 
@@ -210,6 +215,20 @@ final class UsageFetcher: @unchecked Sendable {
       modelBreakdowns.append(DailyModelBreakdown(modelName: modelName, cost: cost))
     }
     return modelBreakdowns
+  }
+
+  private static func parseMachineBreakdowns(_ value: Any?) -> [DailyMachineBreakdown]? {
+    guard let value else { return nil }
+    guard let rows = value as? [[String: Any]] else { return nil }
+    return rows.compactMap { row in
+      guard let machineName = row["machineName"] as? String, !machineName.isEmpty else {
+        return nil
+      }
+      guard let cost = parseNumber(row["cost"]) else {
+        return nil
+      }
+      return DailyMachineBreakdown(machineName: machineName, cost: cost)
+    }
   }
 
   private static func parseNumber(_ value: Any?) -> Double? {

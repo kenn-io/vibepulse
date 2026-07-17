@@ -378,6 +378,151 @@ final class UsageStoreTests: XCTestCase {
     XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
   }
 
+  func testUpsertDailyTotalsPersistsAndReplacesMachineRollupsPerTool() throws {
+    let store = try UsageStore(path: ":memory:")
+
+    try store.upsertDailyTotals(
+      tool: .claude,
+      totals: [
+        DailyTotal(
+          dateKey: "2026-07-16",
+          cost: 12.5,
+          machineBreakdowns: [
+            DailyMachineBreakdown(machineName: "host-a", cost: 8.25),
+            DailyMachineBreakdown(machineName: "host-b", cost: 4.25),
+          ])
+      ])
+    try store.upsertDailyTotals(
+      tool: .claude,
+      totals: [
+        DailyTotal(
+          dateKey: "2026-07-16",
+          cost: 9,
+          machineBreakdowns: [
+            DailyMachineBreakdown(machineName: "host-a", cost: 9)
+          ])
+      ])
+
+    let rollups = store.fetchMachineDailyRollups(since: "2026-07-01", tools: [.claude])
+    XCTAssertEqual(rollups.map(\.dateKey), ["2026-07-16"])
+    XCTAssertEqual(rollups.map(\.tool), [.claude])
+    XCTAssertEqual(rollups.map(\.machineName), ["host-a"])
+    XCTAssertEqual(rollups.map(\.totalCost), [9])
+  }
+
+  func testUpsertDailyTotalsPreservesMachineRollupsWhenBreakdownUnavailable() throws {
+    let store = try UsageStore(path: ":memory:")
+
+    try store.upsertDailyTotals(
+      tool: .codex,
+      totals: [
+        DailyTotal(
+          dateKey: "2026-07-16",
+          cost: 7,
+          machineBreakdowns: [
+            DailyMachineBreakdown(machineName: "host-a", cost: 7)
+          ])
+      ])
+    try store.upsertDailyTotals(
+      tool: .codex,
+      totals: [DailyTotal(dateKey: "2026-07-16", cost: 8)])
+
+    let rollups = store.fetchMachineDailyRollups(since: "2026-07-01", tools: [.codex])
+    XCTAssertEqual(rollups.map(\.machineName), ["host-a"])
+    XCTAssertEqual(rollups.map(\.totalCost), [7])
+  }
+
+  func testInsertMachineSamplesForRefreshResetsAndUsesHighWaterMark() throws {
+    let store = try UsageStore(path: ":memory:")
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 16))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let reset = calendar.date(byAdding: .minute, value: 30, to: start)!
+    let reappearSame = calendar.date(byAdding: .minute, value: 45, to: start)!
+    let reappearHigher = calendar.date(byAdding: .hour, value: 1, to: start)!
+
+    try store.insertMachineSamplesForRefresh(
+      tool: .claude,
+      machineBreakdowns: [DailyMachineBreakdown(machineName: "host-a", cost: 2)],
+      recordedAt: first)
+    try store.insertMachineSamplesForRefresh(
+      tool: .claude, machineBreakdowns: [], recordedAt: reset)
+    try store.insertMachineSamplesForRefresh(
+      tool: .claude,
+      machineBreakdowns: [DailyMachineBreakdown(machineName: "host-a", cost: 2)],
+      recordedAt: reappearSame)
+    try store.insertMachineSamplesForRefresh(
+      tool: .claude,
+      machineBreakdowns: [DailyMachineBreakdown(machineName: "host-a", cost: 5)],
+      recordedAt: reappearHigher)
+
+    let samples = store.fetchMachineSamples(
+      tools: [.claude], from: start, to: reappearHigher)
+    XCTAssertEqual(samples.map(\.totalCost), [2, 0, 2, 5])
+    XCTAssertEqual(samples.map(\.deltaCost), [2, 0, 0, 3])
+  }
+
+  func testMachineSampleDeltaCalculationIsScopedByAgentAndMachine() throws {
+    let store = try UsageStore(path: ":memory:")
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 16))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let second = calendar.date(byAdding: .minute, value: 30, to: start)!
+
+    try store.insertMachineSample(
+      tool: .claude, machineName: "shared-host", totalCost: 10, recordedAt: first)
+    try store.insertMachineSample(
+      tool: .codex, machineName: "shared-host", totalCost: 4, recordedAt: first)
+    try store.insertMachineSample(
+      tool: .claude, machineName: "shared-host", totalCost: 15, recordedAt: second)
+
+    let samples = store.fetchMachineSamples(
+      tools: [.claude, .codex], from: start, to: second)
+    XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
+  }
+
+  func testNormalizeMachineDailyRollupDatesMergesExistingDuplicateLogicalDates() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let store = try UsageStore(path: path)
+    try insertRawMachineDailyRollup(
+      path: path, dateKey: "July 16, 2026", tool: .codex,
+      machineName: "host-a", totalCost: 4)
+    try insertRawMachineDailyRollup(
+      path: path, dateKey: "2026-07-16", tool: .codex,
+      machineName: "host-a", totalCost: 7)
+
+    let normalizedCount = try store.normalizeMachineDailyRollupDates(for: .codex)
+
+    let rollups = store.fetchMachineDailyRollups(since: "2026-07-01", tools: [.codex])
+    XCTAssertEqual(normalizedCount, 1)
+    XCTAssertEqual(rollups.map(\.dateKey), ["2026-07-16"])
+    XCTAssertEqual(rollups.map(\.machineName), ["host-a"])
+    XCTAssertEqual(rollups.map(\.totalCost), [7])
+  }
+
+  func testMigrationBackfillsLegacyMachineSampleDeltas() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let calendar = Calendar.current
+    let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 16))!
+    let first = calendar.date(byAdding: .minute, value: 5, to: start)!
+    let second = calendar.date(byAdding: .minute, value: 30, to: start)!
+
+    try createLegacyMachineSamples(
+      path: path,
+      samples: [
+        (.claude, "shared-host", first, 10),
+        (.codex, "shared-host", first, 4),
+        (.claude, "shared-host", second, 15),
+      ])
+
+    let store = try UsageStore(path: path)
+    let samples = store.fetchMachineSamples(
+      tools: [.claude, .codex], from: start, to: second)
+    XCTAssertEqual(samples.map(\.deltaCost), [10, 4, 5])
+  }
+
   private func insertRawModelDailyRollup(
     path: String,
     dateKey: String,
@@ -408,6 +553,39 @@ final class UsageStoreTests: XCTestCase {
     sqlite3_bind_double(statement, 5, Date().timeIntervalSince1970)
     guard sqlite3_step(statement) == SQLITE_DONE else {
       throw NSError(domain: "UsageStoreTests", code: 3)
+    }
+  }
+
+  private func insertRawMachineDailyRollup(
+    path: String,
+    dateKey: String,
+    tool: UsageTool,
+    machineName: String,
+    totalCost: Double
+  ) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 21)
+    }
+    defer { sqlite3_close(db) }
+
+    let sql = """
+      INSERT INTO machine_daily_rollups (date_key, tool, machine_name, total_cost, updated_at)
+      VALUES (?, ?, ?, ?, ?);
+      """
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 22)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    sqlite3_bind_text(statement, 1, (dateKey as NSString).utf8String, -1, nil)
+    sqlite3_bind_text(statement, 2, (tool.rawValue as NSString).utf8String, -1, nil)
+    sqlite3_bind_text(statement, 3, (machineName as NSString).utf8String, -1, nil)
+    sqlite3_bind_double(statement, 4, totalCost)
+    sqlite3_bind_double(statement, 5, Date().timeIntervalSince1970)
+    guard sqlite3_step(statement) == SQLITE_DONE else {
+      throw NSError(domain: "UsageStoreTests", code: 23)
     }
   }
 
@@ -517,6 +695,56 @@ final class UsageStoreTests: XCTestCase {
         statement, 5, (DateHelper.dateKey(for: recordedAt) as NSString).utf8String, -1, nil)
       guard sqlite3_step(statement) == SQLITE_DONE else {
         throw NSError(domain: "UsageStoreTests", code: 10)
+      }
+    }
+  }
+
+  private func createLegacyMachineSamples(
+    path: String,
+    samples: [(UsageTool, String, Date, Double)]
+  ) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
+    else {
+      throw NSError(domain: "UsageStoreTests", code: 24)
+    }
+    defer { sqlite3_close(db) }
+
+    let createSQL = """
+      CREATE TABLE machine_samples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tool TEXT NOT NULL,
+          machine_name TEXT NOT NULL,
+          recorded_at REAL NOT NULL,
+          total_cost REAL NOT NULL,
+          date_key TEXT NOT NULL
+      );
+      """
+    guard sqlite3_exec(db, createSQL, nil, nil, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 25)
+    }
+
+    let insertSQL = """
+      INSERT INTO machine_samples (tool, machine_name, recorded_at, total_cost, date_key)
+      VALUES (?, ?, ?, ?, ?);
+      """
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, insertSQL, -1, &statement, nil) == SQLITE_OK else {
+      throw NSError(domain: "UsageStoreTests", code: 26)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    for (tool, machineName, recordedAt, totalCost) in samples {
+      sqlite3_reset(statement)
+      sqlite3_clear_bindings(statement)
+      sqlite3_bind_text(statement, 1, (tool.rawValue as NSString).utf8String, -1, nil)
+      sqlite3_bind_text(statement, 2, (machineName as NSString).utf8String, -1, nil)
+      sqlite3_bind_double(statement, 3, recordedAt.timeIntervalSince1970)
+      sqlite3_bind_double(statement, 4, totalCost)
+      sqlite3_bind_text(
+        statement, 5, (DateHelper.dateKey(for: recordedAt) as NSString).utf8String, -1, nil)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw NSError(domain: "UsageStoreTests", code: 27)
       }
     }
   }

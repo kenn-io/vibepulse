@@ -228,6 +228,8 @@ struct MenuContentView: View {
       return model.cumulativeSeries
     case .model:
       return model.modelCumulativeSeries
+    case .machine:
+      return model.machineCumulativeSeries
     }
   }
 
@@ -237,6 +239,8 @@ struct MenuContentView: View {
       return model.dailySeries
     case .model:
       return model.modelDailySeries
+    case .machine:
+      return model.machineDailySeries
     }
   }
 
@@ -246,6 +250,8 @@ struct MenuContentView: View {
       return model.toolTotals
     case .model:
       return model.modelTotals
+    case .machine:
+      return model.machineTotals
     }
   }
 

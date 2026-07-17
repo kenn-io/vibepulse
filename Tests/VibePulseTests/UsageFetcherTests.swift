@@ -82,4 +82,61 @@ final class UsageFetcherTests: XCTestCase {
 
     XCTAssertNil(totals[0].modelBreakdowns)
   }
+
+  func testParseDailyTotalsIncludesValidMachineBreakdowns() throws {
+    let json = """
+      {
+        "daily": [
+          {
+            "date": "2026-07-16",
+            "totalCost": 12.5,
+            "machineBreakdowns": [
+              { "machineName": "host-a", "cost": 8.25 },
+              { "machineName": "host-b", "cost": "4.25" },
+              { "machineName": "", "cost": 1 },
+              { "machineName": "host-c", "cost": "invalid" }
+            ]
+          }
+        ]
+      }
+      """
+    let data = try XCTUnwrap(json.data(using: .utf8))
+
+    let totals = try UsageFetcher.parseDailyTotals(data: data)
+
+    let machineBreakdowns = try XCTUnwrap(totals[0].machineBreakdowns)
+    XCTAssertEqual(machineBreakdowns.map(\.machineName), ["host-a", "host-b"])
+    XCTAssertEqual(machineBreakdowns.map(\.cost), [8.25, 4.25])
+  }
+
+  func testParseDailyTotalsDistinguishesUnavailableMachineBreakdownsFromExplicitEmpty() throws {
+    let json = """
+      {
+        "daily": [
+          {
+            "date": "2026-07-16",
+            "totalCost": 12.5
+          },
+          {
+            "date": "2026-07-17",
+            "totalCost": 7.25,
+            "machineBreakdowns": "malformed"
+          },
+          {
+            "date": "2026-07-18",
+            "totalCost": 4,
+            "machineBreakdowns": []
+          }
+        ]
+      }
+      """
+    let data = try XCTUnwrap(json.data(using: .utf8))
+
+    let totals = try UsageFetcher.parseDailyTotals(data: data)
+
+    XCTAssertNil(totals[0].machineBreakdowns)
+    XCTAssertNil(totals[1].machineBreakdowns)
+    XCTAssertNotNil(totals[2].machineBreakdowns)
+    XCTAssertEqual(totals[2].machineBreakdowns?.count, 0)
+  }
 }
