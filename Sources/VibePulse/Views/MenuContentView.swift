@@ -21,7 +21,7 @@ struct MenuContentView: View {
 
       UsageChartView(
         mode: chartMode,
-        cumulativeSeries: selectedCumulativeSeries,
+        cumulativeSeries: visibleCumulativeSeries,
         dailySeries: visibleDailySeries,
         palette: palette)
 
@@ -253,8 +253,12 @@ struct MenuContentView: View {
     UsageSeriesPalette(
       series: UsageSeriesPalette.canonicalSeries(
         thirtyDaySeries: selectedDailySeries,
-        todayCumulativeSeries: selectedCumulativeSeries,
+        todayCumulativeSeries: visibleCumulativeSeries,
         todayTotals: selectedTotals))
+  }
+
+  private var visibleCumulativeSeries: [UsageSeriesPoint] {
+    UsageSeriesFilters.visibleCumulativeSeries(selectedCumulativeSeries)
   }
 
   private var visibleDailySeries: [UsageSeriesPoint] {
