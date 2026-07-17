@@ -4,8 +4,8 @@ import XCTest
 @testable import VibePulse
 
 final class UsageSeriesPaletteTests: XCTestCase {
-  func testTenSeriesUseGrayFreeTab10InMatplotlibOrder() {
-    let series = modelSeries(count: 10)
+  func testNineSeriesUseGrayFreeTab10InMatplotlibOrder() {
+    let series = modelSeries(count: 9)
 
     let palette = UsageSeriesPalette(series: series)
 
@@ -22,59 +22,44 @@ final class UsageSeriesPaletteTests: XCTestCase {
         UsageSeriesRGB(hex: 0xE377C2),
         UsageSeriesRGB(hex: 0xBCBD22),
         UsageSeriesRGB(hex: 0x17BECF),
-        UsageSeriesRGB(hex: 0xAEC7E8),
       ])
   }
 
-  func testPaletteFamilyChangesAtElevenAndTwentyOneSeries() {
-    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 10)).family, .tab10)
-    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 11)).family, .tab20)
-    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 20)).family, .tab20)
+  func testPaletteFamilyChangesAtTenAndNineteenSeries() {
+    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 9)).family, .tab10)
+    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 10)).family, .tab20)
+    XCTAssertEqual(UsageSeriesPalette(series: modelSeries(count: 18)).family, .tab20)
     XCTAssertEqual(
-      UsageSeriesPalette(series: modelSeries(count: 21)).family,
+      UsageSeriesPalette(series: modelSeries(count: 19)).family,
       .tab20bAndTab20c)
   }
 
-  func testTwentySeriesUseUniqueGrayFreeTab20Colors() {
-    let palette = UsageSeriesPalette(series: modelSeries(count: 20))
+  func testEighteenSeriesUseUniqueGrayFreeTab20Colors() {
+    let palette = UsageSeriesPalette(series: modelSeries(count: 18))
     let colors = palette.orderedSeries.compactMap(palette.rgb(for:))
 
     XCTAssertEqual(palette.family, .tab20)
-    XCTAssertEqual(Set(colors).count, 20)
+    XCTAssertEqual(Set(colors).count, 18)
     XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: 0x7F7F7F)))
     XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: 0xC7C7C7)))
-    XCTAssertEqual(
-      Array(colors.suffix(2)),
-      [
-        UsageSeriesRGB(hex: 0x393B79),
-        UsageSeriesRGB(hex: 0x5254A3),
-      ])
   }
 
-  func testFortySeriesUseUniqueTab20bThenGrayFreeTab20cColors() {
-    let palette = UsageSeriesPalette(series: modelSeries(count: 40))
+  func testThirtySixSeriesUseUniqueTab20bThenGrayFreeTab20cColors() {
+    let palette = UsageSeriesPalette(series: modelSeries(count: 36))
     let colors = palette.orderedSeries.compactMap(palette.rgb(for:))
 
     XCTAssertEqual(palette.family, .tab20bAndTab20c)
-    XCTAssertEqual(Set(colors).count, 40)
+    XCTAssertEqual(Set(colors).count, 36)
     for gray in [0x636363, 0x969696, 0xBDBDBD, 0xD9D9D9] as [UInt32] {
       XCTAssertFalse(colors.contains(UsageSeriesRGB(hex: gray)))
     }
-    XCTAssertEqual(
-      Array(colors.suffix(4)),
-      [
-        UsageSeriesRGB(hex: 0x1F77B4),
-        UsageSeriesRGB(hex: 0xFF7F0E),
-        UsageSeriesRGB(hex: 0x2CA02C),
-        UsageSeriesRGB(hex: 0xD62728),
-      ])
   }
 
-  func testMoreThanFortySeriesCycleTheResolvedFortyColorPalette() throws {
-    let palette = UsageSeriesPalette(series: modelSeries(count: 41))
+  func testMoreThanThirtySixSeriesCycleTheResolvedPalette() throws {
+    let palette = UsageSeriesPalette(series: modelSeries(count: 37))
 
     XCTAssertEqual(
-      try XCTUnwrap(palette.rgb(for: palette.orderedSeries[40])),
+      try XCTUnwrap(palette.rgb(for: palette.orderedSeries[36])),
       try XCTUnwrap(palette.rgb(for: palette.orderedSeries[0])))
   }
 

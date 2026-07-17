@@ -32,14 +32,13 @@ struct UsageSeriesPalette {
     orderedSeries = series.filter { seen.insert($0).inserted }
 
     let colors: [UsageSeriesRGB]
-    switch orderedSeries.count {
-    case ...10:
+    if orderedSeries.count <= Self.tab10.count {
       family = .tab10
       colors = Self.tab10
-    case 11...20:
+    } else if orderedSeries.count <= Self.tab20.count {
       family = .tab20
       colors = Self.tab20
-    default:
+    } else {
       family = .tab20bAndTab20c
       colors = Self.tab20bAndTab20c
     }
@@ -85,14 +84,13 @@ struct UsageSeriesPalette {
   // Values and ordering are based on Matplotlib's qualitative tab10, tab20,
   // tab20b, and tab20c colormaps:
   // https://github.com/matplotlib/matplotlib/blob/v3.10.5/lib/matplotlib/_cm.py#L1286-L1367
-  // Gray entries are replaced with colors from the next qualitative map so
-  // every series keeps enough contrast against the chart background.
+  // Gray entries are omitted, leaving 9, 18, and 36 usable colors.
   private static let tab10 = [
     UsageSeriesRGB(hex: 0x1F77B4), UsageSeriesRGB(hex: 0xFF7F0E),
     UsageSeriesRGB(hex: 0x2CA02C), UsageSeriesRGB(hex: 0xD62728),
     UsageSeriesRGB(hex: 0x9467BD), UsageSeriesRGB(hex: 0x8C564B),
     UsageSeriesRGB(hex: 0xE377C2), UsageSeriesRGB(hex: 0xBCBD22),
-    UsageSeriesRGB(hex: 0x17BECF), UsageSeriesRGB(hex: 0xAEC7E8),
+    UsageSeriesRGB(hex: 0x17BECF),
   ]
 
   private static let tab20 = [
@@ -105,7 +103,6 @@ struct UsageSeriesPalette {
     UsageSeriesRGB(hex: 0xE377C2), UsageSeriesRGB(hex: 0xF7B6D2),
     UsageSeriesRGB(hex: 0xBCBD22), UsageSeriesRGB(hex: 0xDBDB8D),
     UsageSeriesRGB(hex: 0x17BECF), UsageSeriesRGB(hex: 0x9EDAE5),
-    UsageSeriesRGB(hex: 0x393B79), UsageSeriesRGB(hex: 0x5254A3),
   ]
 
   private static let tab20bAndTab20c = [
@@ -127,7 +124,5 @@ struct UsageSeriesPalette {
     UsageSeriesRGB(hex: 0xA1D99B), UsageSeriesRGB(hex: 0xC7E9C0),
     UsageSeriesRGB(hex: 0x756BB1), UsageSeriesRGB(hex: 0x9E9AC8),
     UsageSeriesRGB(hex: 0xBCBDDC), UsageSeriesRGB(hex: 0xDADAEB),
-    UsageSeriesRGB(hex: 0x1F77B4), UsageSeriesRGB(hex: 0xFF7F0E),
-    UsageSeriesRGB(hex: 0x2CA02C), UsageSeriesRGB(hex: 0xD62728),
   ]
 }
