@@ -37,8 +37,8 @@ struct SettingsView: View {
           sourceToggle("Gemini", isOn: $model.includeGemini)
         }
         GridRow {
+          sourceToggle("OMP", isOn: $model.includeOMP)
           sourceToggle("OpenCode", isOn: $model.includeOpenCode)
-          Color.clear.frame(width: 1, height: 1)
         }
       }
     }
