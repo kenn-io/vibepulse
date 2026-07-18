@@ -1,6 +1,6 @@
 # VibePulse
 
-VibePulse is a macOS menu bar app that tracks Claude Code, Codex, Pi, Gemini, OMP, and OpenCode token spend using [agentsview](https://github.com/kenn-io/agentsview).
+VibePulse is a macOS menu bar app that tracks token spend for locally used AI coding agents parsed by [agentsview](https://github.com/kenn-io/agentsview).
 
 ## Highlights
 
@@ -20,8 +20,8 @@ VibePulse is a macOS menu bar app that tracks Claude Code, Codex, Pi, Gemini, OM
 ## Requirements
 
 - macOS 13+ (Ventura)
-- [agentsview](https://github.com/wesm/agentsview) installed (`agentsview` on PATH or path set in Settings)
-- Claude Code, Codex, Pi, Gemini, OMP, and/or OpenCode usage logs on disk
+- [agentsview](https://github.com/kenn-io/agentsview) installed (`agentsview` on PATH or path set in Settings)
+- Local usage from at least one agentsview-parsed agent with priced activity in the past 30 days
 
 ## Install
 
@@ -56,7 +56,7 @@ VibePulse runs outside your shell, so if `agentsview` is installed to a non-stan
   <img src="docs/screenshots/vibepulse_settings.png" alt="Settings" width="50%" />
 </p>
 
-- **Data Sources**: Enable Claude Code, Codex, Pi, Gemini, OMP, and/or OpenCode.
+- **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days. Turning one off hides it from totals and charts without stopping imports or deleting history.
 - **Startup**: Start VibePulse at login (macOS may require approval).
 - **Dependencies**: Set a custom `agentsview` path if needed.
 - **Refresh**: Choose how often the app refreshes (5m, 15m, 1h, 4h, 1d).
@@ -67,10 +67,11 @@ VibePulse runs outside your shell, so if `agentsview` is installed to a non-stan
 - All usage data stays local on your machine.
 - The database lives at `~/Library/Application Support/VibePulse/vibepulse.sqlite`.
 - VibePulse has no analytics or telemetry.
-- It runs `agentsview usage daily --json` to read your local usage data.
+- It runs one aggregate 30-day agentsview usage report to discover local agents, then filtered per-agent reports to store their usage.
 
 ## Troubleshooting
 
+- **Agent not shown**: Run `agentsview usage daily --json --breakdown --since 30d` in Terminal. The agent must appear in `agentBreakdowns` with positive total cost during that window.
 - **No data**: Run `agentsview usage daily` in Terminal to verify usage data exists.
 - **agentsview not found**: Install agentsview or set the path in Settings -> Dependencies.
 - **Start at login**: macOS may require approval in System Settings -> Login Items.

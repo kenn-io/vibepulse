@@ -35,6 +35,12 @@ final class UsageRefreshService: @unchecked Sendable {
               modelBreakdowns: modelBreakdowns,
               recordedAt: sampleTime)
           }
+          if let machineBreakdowns = todayTotal.machineBreakdowns {
+            try store.insertMachineSamplesForRefresh(
+              tool: agent,
+              machineBreakdowns: machineBreakdowns,
+              recordedAt: sampleTime)
+          }
         }
       } catch {
         errors.append("\(agent.displayName): \(error.localizedDescription)")

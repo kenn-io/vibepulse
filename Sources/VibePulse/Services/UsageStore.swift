@@ -403,7 +403,8 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func fetchModelSamples(tools: [UsageAgent], from start: Date, to end: Date) -> [ModelUsageSample] {
+  func fetchModelSamples(tools: [UsageAgent], from start: Date, to end: Date) -> [ModelUsageSample]
+  {
     queue.sync {
       let toolValues = Set(tools.map(\.rawValue))
       let sql = """
@@ -1194,7 +1195,8 @@ final class UsageStore: @unchecked Sendable {
     sqlite3_bind_text(statement, index, (value as NSString).utf8String, -1, sqliteTransient)
   }
 
-  private func fetchDailyRollupCost(tool: UsageAgent, dateKey: String, sql: String) throws -> Double?
+  private func fetchDailyRollupCost(tool: UsageAgent, dateKey: String, sql: String) throws
+    -> Double?
   {
     try withStatement(sql) { statement in
       bindText(statement, index: 1, value: tool.rawValue)

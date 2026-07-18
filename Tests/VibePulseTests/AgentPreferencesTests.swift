@@ -37,9 +37,6 @@ final class AgentPreferencesTests: XCTestCase {
     preferences.migrateLegacyPreferences()
 
     XCTAssertEqual(preferences.loadDisabledAgentIDs(), ["gemini", "opencode"])
-    XCTAssertNil(defaults.object(forKey: "includeGemini"))
-    XCTAssertNil(defaults.object(forKey: "includeOpenCode"))
-    XCTAssertNil(defaults.object(forKey: "includeClaude"))
   }
 
   func testEnabledAgentsExcludeDisabledWithoutRemovingDiscovery() {

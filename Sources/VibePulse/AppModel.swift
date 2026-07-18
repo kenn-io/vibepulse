@@ -41,48 +41,8 @@ final class AppModel: ObservableObject {
       )
     }
   }
-
-  @Published var includeClaude: Bool {
-    didSet {
-      defaults.set(includeClaude, forKey: DefaultsKey.includeClaude)
-      reloadFromStore()
-    }
-  }
-
-  @Published var includeCodex: Bool {
-    didSet {
-      defaults.set(includeCodex, forKey: DefaultsKey.includeCodex)
-      reloadFromStore()
-    }
-  }
-
-  @Published var includePi: Bool {
-    didSet {
-      defaults.set(includePi, forKey: DefaultsKey.includePi)
-      reloadFromStore()
-    }
-  }
-
-  @Published var includeOMP: Bool {
-    didSet {
-      defaults.set(includeOMP, forKey: DefaultsKey.includeOMP)
-      reloadFromStore()
-    }
-  }
-
-  @Published var includeGemini: Bool {
-    didSet {
-      defaults.set(includeGemini, forKey: DefaultsKey.includeGemini)
-      reloadFromStore()
-    }
-  }
-
-  @Published var includeOpenCode: Bool {
-    didSet {
-      defaults.set(includeOpenCode, forKey: DefaultsKey.includeOpenCode)
-      reloadFromStore()
-    }
-  }
+  @Published private(set) var discoveredAgents: [UsageAgent]
+  @Published private(set) var disabledAgentIDs: Set<String>
 
   @Published var refreshInterval: RefreshInterval {
     didSet {
@@ -92,20 +52,20 @@ final class AppModel: ObservableObject {
   }
 
   private let defaults = UserDefaults.standard
-  private let fetcher = UsageFetcher()
+  private let agentPreferences: AgentPreferences
   private let settingsWindowController = SettingsWindowController()
   private let welcomeWindowController = WelcomeWindowController()
   private var timer: DispatchSourceTimer?
   private var isUpdatingLoginItem = false
   private let store: UsageStore
+  private let refreshService: UsageRefreshService
 
   init() {
-    includeClaude = defaults.object(forKey: DefaultsKey.includeClaude) as? Bool ?? true
-    includeCodex = defaults.object(forKey: DefaultsKey.includeCodex) as? Bool ?? true
-    includePi = defaults.object(forKey: DefaultsKey.includePi) as? Bool ?? true
-    includeOMP = defaults.object(forKey: DefaultsKey.includeOMP) as? Bool ?? true
-    includeGemini = defaults.object(forKey: DefaultsKey.includeGemini) as? Bool ?? true
-    includeOpenCode = defaults.object(forKey: DefaultsKey.includeOpenCode) as? Bool ?? true
+    let agentPreferences = AgentPreferences(defaults: defaults)
+    agentPreferences.migrateLegacyPreferences()
+    self.agentPreferences = agentPreferences
+    discoveredAgents = agentPreferences.loadDiscoveredAgents()
+    disabledAgentIDs = agentPreferences.loadDisabledAgentIDs()
     let storedInterval = defaults.string(forKey: DefaultsKey.refreshInterval)
     if let storedInterval, let interval = RefreshInterval(rawValue: storedInterval) {
       refreshInterval = interval
@@ -134,6 +94,7 @@ final class AppModel: ObservableObject {
       store = try! UsageStore(path: ":memory:")
       statusMessage = "Database unavailable. Running without persistence."
     }
+    refreshService = UsageRefreshService(fetcher: UsageFetcher(), store: store)
 
     reloadFromStore()
     scheduleTimer()
@@ -147,57 +108,36 @@ final class AppModel: ObservableObject {
   func refreshNow() {
     guard !isRefreshing else { return }
 
-    let tools = activeTools
-    guard !tools.isEmpty else {
-      statusMessage = "Enable at least one data source in Settings."
-      return
-    }
-
     isRefreshing = true
     statusMessage = nil
 
     let todayKey = DateHelper.dateKey(for: Date())
 
-    DispatchQueue.global(qos: .background).async { [fetcher, store] in
-      var errors: [String] = []
-      let sampleTime = Date()
+    DispatchQueue.global(qos: .background).async { [refreshService] in
+      do {
+        let result = try refreshService.refresh(
+          todayKey: todayKey,
+          sampleTime: Date())
+        let refreshTime = Date()
 
-      for tool in tools {
-        do {
-          let totals = try fetcher.fetchDailyTotals(for: tool)
-          try store.upsertDailyTotals(tool: tool, totals: totals)
-          if let todayTotal = totals.first(where: {
-            DateHelper.normalizedDateKey(from: $0.dateKey) == todayKey
-          }) {
-            try store.insertSample(tool: tool, totalCost: todayTotal.cost, recordedAt: sampleTime)
-            if let modelBreakdowns = todayTotal.modelBreakdowns {
-              try store.insertModelSamplesForRefresh(
-                tool: tool,
-                modelBreakdowns: modelBreakdowns,
-                recordedAt: sampleTime)
-            }
-            if let machineBreakdowns = todayTotal.machineBreakdowns {
-              try store.insertMachineSamplesForRefresh(
-                tool: tool,
-                machineBreakdowns: machineBreakdowns,
-                recordedAt: sampleTime)
-            }
+        DispatchQueue.main.async {
+          self.discoveredAgents = result.discoveredAgents
+          self.agentPreferences.saveDiscoveredAgents(result.discoveredAgents)
+          if result.importErrors.isEmpty {
+            self.statusMessage = nil
+            self.lastUpdated = refreshTime
+          } else {
+            self.statusMessage = result.importErrors.joined(separator: " | ")
           }
-        } catch {
-          errors.append("\(tool.displayName): \(error.localizedDescription)")
+          self.reloadFromStore()
+          self.isRefreshing = false
         }
-      }
-
-      let refreshTime = Date()
-
-      DispatchQueue.main.async {
-        if !errors.isEmpty {
-          self.statusMessage = errors.joined(separator: " | ")
-        } else {
-          self.lastUpdated = refreshTime
+      } catch {
+        DispatchQueue.main.async {
+          self.statusMessage = error.localizedDescription
+          self.reloadFromStore()
+          self.isRefreshing = false
         }
-        self.reloadFromStore()
-        self.isRefreshing = false
       }
     }
   }
@@ -214,25 +154,28 @@ final class AppModel: ObservableObject {
     settingsWindowController.show(model: self)
   }
 
-  private var activeTools: [UsageAgent] {
-    [.claude, .codex, .pi, .omp, .gemini, .openCode].filter { tool in
-      switch tool.rawValue {
-      case "claude":
-        return includeClaude
-      case "codex":
-        return includeCodex
-      case "pi":
-        return includePi
-      case "omp":
-        return includeOMP
-      case "gemini":
-        return includeGemini
-      case "opencode":
-        return includeOpenCode
-      default:
-        return false
-      }
+  var hasDiscoveryCache: Bool {
+    agentPreferences.hasDiscoveryCache
+  }
+
+  func isAgentEnabled(_ agent: UsageAgent) -> Bool {
+    !disabledAgentIDs.contains(agent.rawValue)
+  }
+
+  func setAgent(_ agent: UsageAgent, enabled: Bool) {
+    if enabled {
+      disabledAgentIDs.remove(agent.rawValue)
+    } else {
+      disabledAgentIDs.insert(agent.rawValue)
     }
+    agentPreferences.saveDisabledAgentIDs(disabledAgentIDs)
+    reloadFromStore()
+  }
+
+  private var activeTools: [UsageAgent] {
+    AgentPreferences.enabledAgents(
+      from: discoveredAgents,
+      disabledAgentIDs: disabledAgentIDs)
   }
 
   private func reloadFromStore() {
@@ -357,7 +300,7 @@ final class AppModel: ObservableObject {
         let deltaUpdated = try store.backfillSampleDeltas()
         let modelDeltaUpdated = try store.backfillModelSampleDeltas()
         let machineDeltaUpdated = try store.backfillMachineSampleDeltas()
-        let dateUpdated = try [.claude, .codex, .pi, .omp, .gemini, .openCode].reduce(0) { count, tool in
+        let dateUpdated = try store.storedAgents().reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
             + (try store.normalizeModelDailyRollupDates(for: tool))
             + (try store.normalizeMachineDailyRollupDates(for: tool))
@@ -447,12 +390,6 @@ final class AppModel: ObservableObject {
 
   private enum DefaultsKey {
     static let welcomeKey = "hasSeenWelcome"
-    static let includeClaude = "includeClaude"
-    static let includeCodex = "includeCodex"
-    static let includePi = "includePi"
-    static let includeOMP = "includeOMP"
-    static let includeGemini = "includeGemini"
-    static let includeOpenCode = "includeOpenCode"
     static let refreshMinutes = "refreshMinutes"
     static let refreshInterval = "refreshInterval"
     static let agentsviewPath = "agentsviewPath"

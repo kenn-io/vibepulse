@@ -242,7 +242,8 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       }
     }
 
-    return costByAgent
+    return
+      costByAgent
       .filter { $0.value > 0 }
       .map { UsageAgent($0.key) }
       .sorted()
