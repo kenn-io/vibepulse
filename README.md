@@ -4,6 +4,7 @@ VibePulse is a macOS menu bar app that tracks token spend for locally used AI co
 
 ## Highlights
 
+- Agents parsed by the installed agentsview version should work automatically once they have positive-cost local usage in the past 30 days
 - Combined daily total in the menu bar (what you would pay per token without a subscription)
 - Today view shows cumulative spend over the day
 - 30-day view shows daily totals with per-tool breakdown

@@ -96,6 +96,8 @@ struct UsageSeriesKey: Hashable, Identifiable {
     }
   }
 
+  var chartIdentity: String { id }
+
   var sortKey: String {
     switch kind {
     case .agent:

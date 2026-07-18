@@ -1527,7 +1527,6 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-
   private func ensureSampleDeltaColumn() throws {
     let sql = "PRAGMA table_info(samples);"
     var hasDelta = false

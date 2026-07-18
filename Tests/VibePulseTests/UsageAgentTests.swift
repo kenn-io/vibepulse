@@ -32,4 +32,12 @@ final class UsageAgentTests: XCTestCase {
 
     XCTAssertEqual(agents.sorted().map(\.rawValue), ["alpha", "claude", "zeta"])
   }
+
+  func testChartIdentityDoesNotCollapseAgentsWithTheSameGeneratedLabel() {
+    let hyphenated = UsageSeriesKey.agent(UsageAgent("future-agent"))
+    let underscored = UsageSeriesKey.agent(UsageAgent("future_agent"))
+
+    XCTAssertEqual(hyphenated.displayName, underscored.displayName)
+    XCTAssertNotEqual(hyphenated.chartIdentity, underscored.chartIdentity)
+  }
 }
