@@ -214,21 +214,23 @@ final class AppModel: ObservableObject {
     settingsWindowController.show(model: self)
   }
 
-  private var activeTools: [UsageTool] {
-    UsageTool.allCases.filter { tool in
-      switch tool {
-      case .claude:
+  private var activeTools: [UsageAgent] {
+    [.claude, .codex, .pi, .omp, .gemini, .openCode].filter { tool in
+      switch tool.rawValue {
+      case "claude":
         return includeClaude
-      case .codex:
+      case "codex":
         return includeCodex
-      case .pi:
+      case "pi":
         return includePi
-      case .omp:
+      case "omp":
         return includeOMP
-      case .gemini:
+      case "gemini":
         return includeGemini
-      case .openCode:
+      case "opencode":
         return includeOpenCode
+      default:
+        return false
       }
     }
   }
@@ -355,7 +357,7 @@ final class AppModel: ObservableObject {
         let deltaUpdated = try store.backfillSampleDeltas()
         let modelDeltaUpdated = try store.backfillModelSampleDeltas()
         let machineDeltaUpdated = try store.backfillMachineSampleDeltas()
-        let dateUpdated = try UsageTool.allCases.reduce(0) { count, tool in
+        let dateUpdated = try [.claude, .codex, .pi, .omp, .gemini, .openCode].reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
             + (try store.normalizeModelDailyRollupDates(for: tool))
             + (try store.normalizeMachineDailyRollupDates(for: tool))

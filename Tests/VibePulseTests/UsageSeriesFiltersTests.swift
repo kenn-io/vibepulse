@@ -45,4 +45,14 @@ final class UsageSeriesFiltersTests: XCTestCase {
 
     XCTAssertEqual(visible.map(\.tool), [.codex])
   }
+  func testVisibleDailySeriesAcceptsUnknownAgentIdentifiers() {
+    let today = DateHelper.date(fromKey: DateHelper.dateKey(for: Date()))!
+    let future = UsageAgent("future-agent")
+    let points = [UsageSeriesPoint(tool: future, date: today, cost: 1)]
+
+    let visible = UsageSeriesFilters.visibleDailySeries(points, mode: .sevenDays)
+
+    XCTAssertEqual(visible.map(\.tool), [future])
+  }
+
 }
