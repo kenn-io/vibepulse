@@ -12,15 +12,16 @@ final class UsageToolTests: XCTestCase {
   func testDailyCommandsFilterAgentsviewByToolAgentName() {
     XCTAssertEqual(
       UsageTool.pi.dailyCommand,
-      ["agentsview", "usage", "daily", "--json", "--agent", "pi"])
+      ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "pi"])
     XCTAssertEqual(
       UsageTool.omp.dailyCommand,
-      ["agentsview", "usage", "daily", "--json", "--agent", "omp"])
+      ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "omp"])
     XCTAssertEqual(
       UsageTool.gemini.dailyCommand,
-      ["agentsview", "usage", "daily", "--json", "--agent", "gemini"])
+      ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "gemini"])
     XCTAssertEqual(
       UsageTool.openCode.dailyCommand,
-      ["agentsview", "usage", "daily", "--json", "--agent", "opencode"])
+      ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "opencode"])
+    XCTAssertTrue(UsageTool.allCases.allSatisfy { $0.dailyCommand.contains("--breakdown") })
   }
 }

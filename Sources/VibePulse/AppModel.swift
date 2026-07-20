@@ -11,6 +11,9 @@ final class AppModel: ObservableObject {
   @Published var modelCumulativeSeries: [UsageSeriesPoint] = []
   @Published var modelDailySeries: [UsageSeriesPoint] = []
   @Published var modelTotals: [ToolTotal] = []
+  @Published var machineCumulativeSeries: [UsageSeriesPoint] = []
+  @Published var machineDailySeries: [UsageSeriesPoint] = []
+  @Published var machineTotals: [ToolTotal] = []
   @Published var lastUpdated: Date?
   @Published var statusMessage: String?
   @Published var isRefreshing = false
@@ -173,6 +176,12 @@ final class AppModel: ObservableObject {
                 modelBreakdowns: modelBreakdowns,
                 recordedAt: sampleTime)
             }
+            if let machineBreakdowns = todayTotal.machineBreakdowns {
+              try store.insertMachineSamplesForRefresh(
+                tool: tool,
+                machineBreakdowns: machineBreakdowns,
+                recordedAt: sampleTime)
+            }
           }
         } catch {
           errors.append("\(tool.displayName): \(error.localizedDescription)")
@@ -256,6 +265,8 @@ final class AppModel: ObservableObject {
 
     let modelSamples = store.fetchModelSamples(tools: tools, from: startOfDay, to: now)
     modelCumulativeSeries = UsageSeriesAggregation.cumulativeModelSeries(from: modelSamples)
+    let machineSamples = store.fetchMachineSamples(tools: tools, from: startOfDay, to: now)
+    machineCumulativeSeries = UsageSeriesAggregation.cumulativeMachineSeries(from: machineSamples)
 
     let sinceKey = DateHelper.dateKeyDaysAgo(29)
     let rollups = store.fetchDailyRollups(since: sinceKey)
@@ -268,6 +279,8 @@ final class AppModel: ObservableObject {
 
     let modelRollups = store.fetchModelDailyRollups(since: sinceKey, tools: tools)
     modelDailySeries = aggregateModelDailySeries(modelRollups)
+    let machineRollups = store.fetchMachineDailyRollups(since: sinceKey, tools: tools)
+    machineDailySeries = UsageSeriesAggregation.dailyMachineSeries(from: machineRollups)
 
     let todayKey = DateHelper.dateKey(for: Date())
     var totals: [ToolTotal] = []
@@ -279,6 +292,8 @@ final class AppModel: ObservableObject {
     }
     toolTotals = totals
     modelTotals = aggregateModelTotals(modelRollups, todayKey: todayKey)
+    machineTotals = UsageSeriesAggregation.machineTotals(
+      from: machineRollups, dateKey: todayKey)
     let combined = totals.reduce(0) { $0 + $1.totalCost }
     menuTotalText = Formatters.currencyString(combined)
   }
@@ -339,12 +354,14 @@ final class AppModel: ObservableObject {
       do {
         let deltaUpdated = try store.backfillSampleDeltas()
         let modelDeltaUpdated = try store.backfillModelSampleDeltas()
+        let machineDeltaUpdated = try store.backfillMachineSampleDeltas()
         let dateUpdated = try UsageTool.allCases.reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
             + (try store.normalizeModelDailyRollupDates(for: tool))
+            + (try store.normalizeMachineDailyRollupDates(for: tool))
         }
         let message =
-          "Maintenance complete. Updated \(deltaUpdated + modelDeltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
+          "Maintenance complete. Updated \(deltaUpdated + modelDeltaUpdated + machineDeltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
         let now = Date()
         DispatchQueue.main.async {
           self.maintenanceMessage = message

@@ -42,6 +42,7 @@ enum ChartMode: String, CaseIterable, Identifiable {
 enum UsageAggregationMode: String, CaseIterable, Identifiable {
   case agent
   case model
+  case machine
 
   var id: String { rawValue }
 
@@ -51,6 +52,8 @@ enum UsageAggregationMode: String, CaseIterable, Identifiable {
       return "Agent"
     case .model:
       return "Model"
+    case .machine:
+      return "Machine"
     }
   }
 }
@@ -58,6 +61,7 @@ enum UsageAggregationMode: String, CaseIterable, Identifiable {
 enum UsageSeriesKind: String {
   case agent
   case model
+  case machine
 }
 
 struct UsageSeriesKey: Hashable, Identifiable {
@@ -74,6 +78,10 @@ struct UsageSeriesKey: Hashable, Identifiable {
     UsageSeriesKey(kind: .model, value: modelName)
   }
 
+  static func machine(_ machineName: String) -> UsageSeriesKey {
+    UsageSeriesKey(kind: .machine, value: machineName)
+  }
+
   var tool: UsageTool? {
     guard kind == .agent else { return nil }
     return UsageTool(rawValue: value)
@@ -83,7 +91,7 @@ struct UsageSeriesKey: Hashable, Identifiable {
     switch kind {
     case .agent:
       return tool?.displayName ?? value
-    case .model:
+    case .model, .machine:
       return value
     }
   }
@@ -95,6 +103,8 @@ struct UsageSeriesKey: Hashable, Identifiable {
       return String(format: "%03d-%@", index, displayName)
     case .model:
       return "500-\(displayName)"
+    case .machine:
+      return "600-\(displayName)"
     }
   }
 
@@ -170,15 +180,27 @@ struct DailyModelBreakdown {
   let cost: Double
 }
 
+struct DailyMachineBreakdown {
+  let machineName: String
+  let cost: Double
+}
+
 struct DailyTotal {
   let dateKey: String
   let cost: Double
   let modelBreakdowns: [DailyModelBreakdown]?
+  let machineBreakdowns: [DailyMachineBreakdown]?
 
-  init(dateKey: String, cost: Double, modelBreakdowns: [DailyModelBreakdown]? = nil) {
+  init(
+    dateKey: String,
+    cost: Double,
+    modelBreakdowns: [DailyModelBreakdown]? = nil,
+    machineBreakdowns: [DailyMachineBreakdown]? = nil
+  ) {
     self.dateKey = dateKey
     self.cost = cost
     self.modelBreakdowns = modelBreakdowns
+    self.machineBreakdowns = machineBreakdowns
   }
 }
 
@@ -197,6 +219,14 @@ struct ModelUsageSample {
   let deltaCost: Double
 }
 
+struct MachineUsageSample {
+  let tool: UsageTool
+  let machineName: String
+  let recordedAt: Date
+  let totalCost: Double
+  let deltaCost: Double
+}
+
 struct DailyRollup {
   let dateKey: String
   let tool: UsageTool
@@ -207,6 +237,13 @@ struct ModelDailyRollup {
   let dateKey: String
   let tool: UsageTool
   let modelName: String
+  let totalCost: Double
+}
+
+struct MachineDailyRollup {
+  let dateKey: String
+  let tool: UsageTool
+  let machineName: String
   let totalCost: Double
 }
 

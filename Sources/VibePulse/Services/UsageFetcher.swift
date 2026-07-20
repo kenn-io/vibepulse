@@ -7,6 +7,12 @@ final class UsageFetcher: @unchecked Sendable {
     case agentsviewNotFound(String?)
   }
 
+  private let commandRunner: (([String]) throws -> Data)?
+
+  init(commandRunner: (([String]) throws -> Data)? = nil) {
+    self.commandRunner = commandRunner
+  }
+
   func fetchDailyTotals(for tool: UsageTool) throws -> [DailyTotal] {
     // Retry transient failures so a refresh that lands while
     // agentsview is mid-replace (self-update or reinstall) doesn't
@@ -16,7 +22,14 @@ final class UsageFetcher: @unchecked Sendable {
 
     for attempt in 1...maxAttempts {
       do {
-        let data = try runCommand(tool.dailyCommand)
+        let data: Data
+        do {
+          data = try executeCommand(tool.dailyCommand)
+        } catch FetchError.commandFailed(let output)
+          where Self.isUnsupportedBreakdownError(output)
+        {
+          data = try executeCommand(tool.dailyCommand.filter { $0 != "--breakdown" })
+        }
         return try Self.parseDailyTotals(data: data)
       } catch FetchError.agentsviewNotFound(let path) {
         throw FetchError.agentsviewNotFound(path)
@@ -31,6 +44,26 @@ final class UsageFetcher: @unchecked Sendable {
     // Unreachable: the loop returns on success or throws on the
     // final attempt, but the compiler can't prove it.
     throw FetchError.commandFailed("retry loop exhausted")
+  }
+
+  private func executeCommand(_ arguments: [String]) throws -> Data {
+    if let commandRunner {
+      return try commandRunner(arguments)
+    }
+    return try runCommand(arguments)
+  }
+
+  private static func isUnsupportedBreakdownError(_ output: String) -> Bool {
+    let message = output.lowercased()
+    guard message.contains("--breakdown") else { return false }
+    return [
+      "unknown flag",
+      "unknown option",
+      "unrecognized argument",
+      "unrecognized option",
+      "unexpected argument",
+      "flag provided but not defined",
+    ].contains { message.contains($0) }
   }
 
   private func runCommand(_ arguments: [String]) throws -> Data {
@@ -192,7 +225,12 @@ final class UsageFetcher: @unchecked Sendable {
         return nil
       }
       let modelBreakdowns = parseModelBreakdowns(row["modelBreakdowns"])
-      return DailyTotal(dateKey: dateKey, cost: cost, modelBreakdowns: modelBreakdowns)
+      let machineBreakdowns = parseMachineBreakdowns(row["machineBreakdowns"])
+      return DailyTotal(
+        dateKey: dateKey,
+        cost: cost,
+        modelBreakdowns: modelBreakdowns,
+        machineBreakdowns: machineBreakdowns)
     }
   }
 
@@ -210,6 +248,22 @@ final class UsageFetcher: @unchecked Sendable {
       modelBreakdowns.append(DailyModelBreakdown(modelName: modelName, cost: cost))
     }
     return modelBreakdowns
+  }
+
+  private static func parseMachineBreakdowns(_ value: Any?) -> [DailyMachineBreakdown]? {
+    guard let value else { return nil }
+    guard let rows = value as? [[String: Any]] else { return nil }
+    var breakdowns: [DailyMachineBreakdown] = []
+    for row in rows {
+      guard let machineName = row["machineName"] as? String, !machineName.isEmpty else {
+        return nil
+      }
+      guard let cost = parseNumber(row["cost"]) else {
+        return nil
+      }
+      breakdowns.append(DailyMachineBreakdown(machineName: machineName, cost: cost))
+    }
+    return breakdowns
   }
 
   private static func parseNumber(_ value: Any?) -> Double? {

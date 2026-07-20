@@ -3,6 +3,15 @@ import XCTest
 @testable import VibePulse
 
 final class ChartModeTests: XCTestCase {
+  func testUsageAggregationModesIncludeMachineInDisplayOrder() {
+    XCTAssertEqual(
+      UsageAggregationMode.allCases.map(\.rawValue),
+      ["agent", "model", "machine"])
+    XCTAssertEqual(
+      UsageAggregationMode.allCases.map(\.title),
+      ["Agent", "Model", "Machine"])
+  }
+
   func testChartModesIncludeSevenDayViewInDisplayOrder() {
     XCTAssertEqual(
       ChartMode.allCases.map(\.rawValue),

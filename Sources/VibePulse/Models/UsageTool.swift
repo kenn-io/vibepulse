@@ -45,17 +45,17 @@ enum UsageTool: String, CaseIterable, Identifiable {
   var dailyCommand: [String] {
     switch self {
     case .claude:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "claude"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "claude"]
     case .codex:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "codex"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "codex"]
     case .pi:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "pi"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "pi"]
     case .omp:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "omp"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "omp"]
     case .gemini:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "gemini"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "gemini"]
     case .openCode:
-      return ["agentsview", "usage", "daily", "--json", "--agent", "opencode"]
+      return ["agentsview", "usage", "daily", "--json", "--breakdown", "--agent", "opencode"]
     }
   }
 }
