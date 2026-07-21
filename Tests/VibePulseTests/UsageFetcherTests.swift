@@ -30,7 +30,12 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertEqual(commands.count, 2)
     XCTAssertTrue(commands[0].contains("--breakdown"))
     XCTAssertFalse(commands[1].contains("--breakdown"))
-    XCTAssertEqual(commands[1].suffix(2), ["--agent", "claude"])
+    XCTAssertEqual(
+      commands[1],
+      [
+        "agentsview", "usage", "daily", "--json", "--agent", "claude",
+        "--since", "30d", "--no-sync",
+      ])
   }
 
   func testParseDailyTotalsIncludesModelBreakdowns() throws {
@@ -188,5 +193,47 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertNil(totals[1].machineBreakdowns)
     XCTAssertNotNil(totals[2].machineBreakdowns)
     XCTAssertEqual(totals[2].machineBreakdowns?.count, 0)
+  }
+
+  func testParseDiscoveredAgentsSumsThirtyDayBreakdownsAndDropsZeroCostAgents() throws {
+    let json = """
+      {
+        "daily": [
+          {
+            "date": "2026-07-01",
+            "agentBreakdowns": [
+              { "agent": "claude", "cost": 2.5 },
+              { "agent": "zero-agent", "cost": 0 }
+            ]
+          },
+          {
+            "date": "2026-07-02",
+            "agentBreakdowns": [
+              { "agent": "claude", "cost": 1.5 },
+              { "agent": "future-agent", "cost": 3 }
+            ]
+          }
+        ]
+      }
+      """
+
+    let agents = try UsageFetcher.parseDiscoveredAgents(
+      data: try XCTUnwrap(json.data(using: .utf8)))
+
+    XCTAssertEqual(agents.map(\.rawValue), ["claude", "future-agent"])
+  }
+
+  func testParseDiscoveredAgentsReturnsEmptyForValidEmptyReport() throws {
+    let data = try XCTUnwrap(#"{"daily":[]}"#.data(using: .utf8))
+
+    XCTAssertEqual(try UsageFetcher.parseDiscoveredAgents(data: data), [])
+  }
+
+  func testParseDiscoveredAgentsRejectsMalformedRequiredBreakdownRows() throws {
+    let data = try XCTUnwrap(
+      #"{"daily":[{"date":"2026-07-02","agentBreakdowns":[{"agent":"future-agent"}]}]}"#
+        .data(using: .utf8))
+
+    XCTAssertThrowsError(try UsageFetcher.parseDiscoveredAgents(data: data))
   }
 }

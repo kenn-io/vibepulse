@@ -1,9 +1,12 @@
 import Foundation
 
 enum HourlyUsageInferer {
-  static func inferPoints(tool: UsageTool, samples: [UsageSample], startOfDay: Date, end: Date)
-    -> [UsageSeriesPoint]
-  {
+  static func inferPoints(
+    tool: UsageAgent,
+    samples: [UsageSample],
+    startOfDay: Date,
+    end: Date
+  ) -> [UsageSeriesPoint] {
     guard startOfDay < end else { return [] }
     guard !samples.isEmpty else { return [] }
 

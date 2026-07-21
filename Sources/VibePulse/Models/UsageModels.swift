@@ -70,8 +70,8 @@ struct UsageSeriesKey: Hashable, Identifiable {
 
   var id: String { "\(kind.rawValue):\(value)" }
 
-  static func agent(_ tool: UsageTool) -> UsageSeriesKey {
-    UsageSeriesKey(kind: .agent, value: tool.rawValue)
+  static func agent(_ agent: UsageAgent) -> UsageSeriesKey {
+    UsageSeriesKey(kind: .agent, value: agent.rawValue)
   }
 
   static func model(_ modelName: String) -> UsageSeriesKey {
@@ -82,9 +82,9 @@ struct UsageSeriesKey: Hashable, Identifiable {
     UsageSeriesKey(kind: .machine, value: machineName)
   }
 
-  var tool: UsageTool? {
-    guard kind == .agent else { return nil }
-    return UsageTool(rawValue: value)
+  var tool: UsageAgent? {
+    guard kind == .agent, !value.isEmpty else { return nil }
+    return UsageAgent(value)
   }
 
   var displayName: String {
@@ -96,11 +96,12 @@ struct UsageSeriesKey: Hashable, Identifiable {
     }
   }
 
+  var chartIdentity: String { id }
+
   var sortKey: String {
     switch kind {
     case .agent:
-      let index = tool.flatMap { UsageTool.allCases.firstIndex(of: $0) } ?? 999
-      return String(format: "%03d-%@", index, displayName)
+      return "000-\(tool?.displayName.lowercased() ?? value.lowercased())-\(value)"
     case .model:
       return "500-\(displayName)"
     case .machine:
@@ -205,14 +206,14 @@ struct DailyTotal {
 }
 
 struct UsageSample {
-  let tool: UsageTool
+  let tool: UsageAgent
   let recordedAt: Date
   let totalCost: Double
   let deltaCost: Double
 }
 
 struct ModelUsageSample {
-  let tool: UsageTool
+  let tool: UsageAgent
   let modelName: String
   let recordedAt: Date
   let totalCost: Double
@@ -220,7 +221,7 @@ struct ModelUsageSample {
 }
 
 struct MachineUsageSample {
-  let tool: UsageTool
+  let tool: UsageAgent
   let machineName: String
   let recordedAt: Date
   let totalCost: Double
@@ -229,20 +230,20 @@ struct MachineUsageSample {
 
 struct DailyRollup {
   let dateKey: String
-  let tool: UsageTool
+  let tool: UsageAgent
   let totalCost: Double
 }
 
 struct ModelDailyRollup {
   let dateKey: String
-  let tool: UsageTool
+  let tool: UsageAgent
   let modelName: String
   let totalCost: Double
 }
 
 struct MachineDailyRollup {
   let dateKey: String
-  let tool: UsageTool
+  let tool: UsageAgent
   let machineName: String
   let totalCost: Double
 }
@@ -259,11 +260,11 @@ struct UsageSeriesPoint: Identifiable {
     self.cost = cost
   }
 
-  init(tool: UsageTool, date: Date, cost: Double) {
+  init(tool: UsageAgent, date: Date, cost: Double) {
     self.init(series: .agent(tool), date: date, cost: cost)
   }
 
-  var tool: UsageTool? { series.tool }
+  var tool: UsageAgent? { series.tool }
 }
 
 struct ToolTotal: Identifiable {
@@ -276,9 +277,9 @@ struct ToolTotal: Identifiable {
     self.totalCost = totalCost
   }
 
-  init(tool: UsageTool, totalCost: Double) {
+  init(tool: UsageAgent, totalCost: Double) {
     self.init(series: .agent(tool), totalCost: totalCost)
   }
 
-  var tool: UsageTool? { series.tool }
+  var tool: UsageAgent? { series.tool }
 }

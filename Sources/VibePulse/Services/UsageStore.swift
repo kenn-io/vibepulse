@@ -42,7 +42,7 @@ final class UsageStore: @unchecked Sendable {
     sqlite3_close(db)
   }
 
-  func upsertDailyTotals(tool: UsageTool, totals: [DailyTotal]) throws {
+  func upsertDailyTotals(tool: UsageAgent, totals: [DailyTotal]) throws {
     try queue.sync {
       do {
         try execute("BEGIN IMMEDIATE TRANSACTION;")
@@ -84,7 +84,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func insertSample(tool: UsageTool, totalCost: Double, recordedAt: Date) throws {
+  func insertSample(tool: UsageAgent, totalCost: Double, recordedAt: Date) throws {
     try queue.sync {
       let sql = """
         INSERT INTO samples (tool, recorded_at, total_cost, delta_cost, date_key)
@@ -106,7 +106,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func fetchSamples(tool: UsageTool, from start: Date, to end: Date) -> [UsageSample] {
+  func fetchSamples(tool: UsageAgent, from start: Date, to end: Date) -> [UsageSample] {
     queue.sync {
       let sql = """
         SELECT recorded_at, total_cost, delta_cost
@@ -136,6 +136,31 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
+  func storedAgents() -> [UsageAgent] {
+    queue.sync {
+      let sql = """
+        SELECT tool FROM samples
+        UNION SELECT tool FROM daily_rollups
+        UNION SELECT tool FROM model_samples
+        UNION SELECT tool FROM model_daily_rollups;
+        """
+      var agents = Set<UsageAgent>()
+      do {
+        try withStatement(sql) { statement in
+          while sqlite3_step(statement) == SQLITE_ROW {
+            guard let toolCString = sqlite3_column_text(statement, 0) else { continue }
+            let rawValue = String(cString: toolCString)
+            guard !rawValue.isEmpty else { continue }
+            agents.insert(UsageAgent(rawValue))
+          }
+        }
+      } catch {
+        return []
+      }
+      return agents.sorted()
+    }
+  }
+
   func fetchDailyRollups(since dateKey: String) -> [DailyRollup] {
     queue.sync {
       let sql = """
@@ -159,9 +184,8 @@ final class UsageStore: @unchecked Sendable {
               continue
             }
             let toolRaw = String(cString: toolCString)
-            guard let tool = UsageTool(rawValue: toolRaw) else {
-              continue
-            }
+            guard !toolRaw.isEmpty else { continue }
+            let tool = UsageAgent(toolRaw)
             let totalCost = sqlite3_column_double(statement, 2)
             results.append(DailyRollup(dateKey: normalizedKey, tool: tool, totalCost: totalCost))
           }
@@ -173,7 +197,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func fetchModelDailyRollups(since dateKey: String, tools: [UsageTool]) -> [ModelDailyRollup] {
+  func fetchModelDailyRollups(since dateKey: String, tools: [UsageAgent]) -> [ModelDailyRollup] {
     queue.sync {
       let toolValues = Set(tools.map(\.rawValue))
       let sql = """
@@ -198,9 +222,8 @@ final class UsageStore: @unchecked Sendable {
               continue
             }
             let toolRaw = String(cString: toolCString)
-            guard toolValues.contains(toolRaw), let tool = UsageTool(rawValue: toolRaw) else {
-              continue
-            }
+            guard toolValues.contains(toolRaw), !toolRaw.isEmpty else { continue }
+            let tool = UsageAgent(toolRaw)
             let modelName = String(cString: modelNameCString)
             let totalCost = sqlite3_column_double(statement, 3)
             results.append(
@@ -217,7 +240,7 @@ final class UsageStore: @unchecked Sendable {
       return results.sorted {
         if $0.dateKey == $1.dateKey {
           if $0.modelName == $1.modelName {
-            return toolOrder($0.tool) < toolOrder($1.tool)
+            return $0.tool < $1.tool
           }
           return $0.modelName < $1.modelName
         }
@@ -227,7 +250,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func fetchMachineDailyRollups(
-    since dateKey: String, tools: [UsageTool]
+    since dateKey: String, tools: [UsageAgent]
   ) -> [MachineDailyRollup] {
     queue.sync {
       let allowedTools = Set(tools)
@@ -254,9 +277,9 @@ final class UsageStore: @unchecked Sendable {
               continue
             }
             let toolRaw = String(cString: toolCString)
-            guard let tool = UsageTool(rawValue: toolRaw), allowedTools.contains(tool) else {
-              continue
-            }
+            guard !toolRaw.isEmpty else { continue }
+            let tool = UsageAgent(toolRaw)
+            guard allowedTools.contains(tool) else { continue }
             let machineName = String(cString: machineNameCString)
             let totalCost = sqlite3_column_double(statement, 3)
             results.append(
@@ -282,7 +305,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func dailyTotal(for dateKey: String, tool: UsageTool) -> Double? {
+  func dailyTotal(for dateKey: String, tool: UsageAgent) -> Double? {
     queue.sync {
       let sql = """
         SELECT total_cost
@@ -305,7 +328,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func latestSample(for dateKey: String, tool: UsageTool) -> UsageSample? {
+  func latestSample(for dateKey: String, tool: UsageAgent) -> UsageSample? {
     queue.sync {
       let sql = """
         SELECT recorded_at, total_cost, delta_cost
@@ -334,7 +357,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func insertModelSample(
-    tool: UsageTool,
+    tool: UsageAgent,
     modelName: String,
     totalCost: Double,
     recordedAt: Date
@@ -349,7 +372,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func insertModelSamplesForRefresh(
-    tool: UsageTool,
+    tool: UsageAgent,
     modelBreakdowns: [DailyModelBreakdown],
     recordedAt: Date
   ) throws {
@@ -380,7 +403,8 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func fetchModelSamples(tools: [UsageTool], from start: Date, to end: Date) -> [ModelUsageSample] {
+  func fetchModelSamples(tools: [UsageAgent], from start: Date, to end: Date) -> [ModelUsageSample]
+  {
     queue.sync {
       let toolValues = Set(tools.map(\.rawValue))
       let sql = """
@@ -401,9 +425,8 @@ final class UsageStore: @unchecked Sendable {
               continue
             }
             let toolRaw = String(cString: toolCString)
-            guard toolValues.contains(toolRaw), let tool = UsageTool(rawValue: toolRaw) else {
-              continue
-            }
+            guard toolValues.contains(toolRaw), !toolRaw.isEmpty else { continue }
+            let tool = UsageAgent(toolRaw)
             let modelName = String(cString: modelNameCString)
             let recordedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
             let totalCost = sqlite3_column_double(statement, 3)
@@ -425,7 +448,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func insertMachineSample(
-    tool: UsageTool,
+    tool: UsageAgent,
     machineName: String,
     totalCost: Double,
     recordedAt: Date
@@ -440,7 +463,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func insertMachineSamplesForRefresh(
-    tool: UsageTool,
+    tool: UsageAgent,
     machineBreakdowns: [DailyMachineBreakdown],
     recordedAt: Date
   ) throws {
@@ -472,7 +495,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   func fetchMachineSamples(
-    tools: [UsageTool], from start: Date, to end: Date
+    tools: [UsageAgent], from start: Date, to end: Date
   ) -> [MachineUsageSample] {
     queue.sync {
       let toolValues = Set(tools.map(\.rawValue))
@@ -494,9 +517,10 @@ final class UsageStore: @unchecked Sendable {
               continue
             }
             let toolRaw = String(cString: toolCString)
-            guard toolValues.contains(toolRaw), let tool = UsageTool(rawValue: toolRaw) else {
+            guard toolValues.contains(toolRaw), !toolRaw.isEmpty else {
               continue
             }
+            let tool = UsageAgent(toolRaw)
             let machineName = String(cString: machineNameCString)
             let recordedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
             let totalCost = sqlite3_column_double(statement, 3)
@@ -732,7 +756,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func normalizeDailyRollupDates(for tool: UsageTool) throws -> Int {
+  func normalizeDailyRollupDates(for tool: UsageAgent) throws -> Int {
     try queue.sync {
       do {
         try execute("BEGIN IMMEDIATE TRANSACTION;")
@@ -829,7 +853,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func normalizeModelDailyRollupDates(for tool: UsageTool) throws -> Int {
+  func normalizeModelDailyRollupDates(for tool: UsageAgent) throws -> Int {
     try queue.sync {
       do {
         try execute("BEGIN IMMEDIATE TRANSACTION;")
@@ -938,7 +962,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  func normalizeMachineDailyRollupDates(for tool: UsageTool) throws -> Int {
+  func normalizeMachineDailyRollupDates(for tool: UsageAgent) throws -> Int {
     try queue.sync {
       do {
         try execute("BEGIN IMMEDIATE TRANSACTION;")
@@ -1171,7 +1195,8 @@ final class UsageStore: @unchecked Sendable {
     sqlite3_bind_text(statement, index, (value as NSString).utf8String, -1, sqliteTransient)
   }
 
-  private func fetchDailyRollupCost(tool: UsageTool, dateKey: String, sql: String) throws -> Double?
+  private func fetchDailyRollupCost(tool: UsageAgent, dateKey: String, sql: String) throws
+    -> Double?
   {
     try withStatement(sql) { statement in
       bindText(statement, index: 1, value: tool.rawValue)
@@ -1184,7 +1209,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func fetchModelDailyRollupCost(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     modelName: String,
     sql: String
@@ -1201,7 +1226,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func fetchMachineDailyRollupCost(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     machineName: String,
     sql: String
@@ -1217,7 +1242,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func upsertDailyTotal(tool: UsageTool, dateKey: String, totalCost: Double) throws {
+  private func upsertDailyTotal(tool: UsageAgent, dateKey: String, totalCost: Double) throws {
     let sql = """
       INSERT INTO daily_rollups (date_key, tool, total_cost, updated_at)
       VALUES (?, ?, ?, ?)
@@ -1238,7 +1263,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func upsertModelDailyTotal(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     modelName: String,
     totalCost: Double
@@ -1264,7 +1289,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func upsertModelDailyTotals(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     totals: [DailyModelBreakdown]
   ) throws {
@@ -1290,7 +1315,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func upsertMachineDailyTotal(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     machineName: String,
     totalCost: Double
@@ -1316,7 +1341,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func upsertMachineDailyTotals(
-    tool: UsageTool,
+    tool: UsageAgent,
     dateKey: String,
     totals: [DailyMachineBreakdown]
   ) throws {
@@ -1342,7 +1367,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func insertModelSampleInCurrentQueue(
-    tool: UsageTool,
+    tool: UsageAgent,
     modelName: String,
     totalCost: Double,
     recordedAt: Date
@@ -1368,7 +1393,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func modelSampleNames(for dateKey: String, tool: UsageTool) throws -> Set<String> {
+  private func modelSampleNames(for dateKey: String, tool: UsageAgent) throws -> Set<String> {
     let sql = """
       SELECT DISTINCT model_name
       FROM model_samples
@@ -1389,7 +1414,7 @@ final class UsageStore: @unchecked Sendable {
   }
 
   private func insertMachineSampleInCurrentQueue(
-    tool: UsageTool,
+    tool: UsageAgent,
     machineName: String,
     totalCost: Double,
     recordedAt: Date
@@ -1416,7 +1441,7 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func machineSampleNames(for dateKey: String, tool: UsageTool) throws -> Set<String> {
+  private func machineSampleNames(for dateKey: String, tool: UsageAgent) throws -> Set<String> {
     let sql = """
       SELECT DISTINCT machine_name
       FROM machine_samples
@@ -1436,7 +1461,7 @@ final class UsageStore: @unchecked Sendable {
     return machineNames
   }
 
-  private func latestSampleCost(for dateKey: String, tool: UsageTool) throws -> Double? {
+  private func latestSampleCost(for dateKey: String, tool: UsageAgent) throws -> Double? {
     let sql = """
       SELECT total_cost
       FROM samples
@@ -1456,7 +1481,7 @@ final class UsageStore: @unchecked Sendable {
 
   private func maxModelSampleCost(
     for dateKey: String,
-    tool: UsageTool,
+    tool: UsageAgent,
     modelName: String
   ) throws -> Double? {
     let sql = """
@@ -1480,7 +1505,7 @@ final class UsageStore: @unchecked Sendable {
 
   private func maxMachineSampleCost(
     for dateKey: String,
-    tool: UsageTool,
+    tool: UsageAgent,
     machineName: String
   ) throws -> Double? {
     let sql = """
@@ -1500,10 +1525,6 @@ final class UsageStore: @unchecked Sendable {
       }
       return nil
     }
-  }
-
-  private func toolOrder(_ tool: UsageTool) -> Int {
-    UsageTool.allCases.firstIndex(of: tool) ?? 0
   }
 
   private func ensureSampleDeltaColumn() throws {

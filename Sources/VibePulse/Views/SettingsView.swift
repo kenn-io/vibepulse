@@ -27,18 +27,35 @@ struct SettingsView: View {
 
   private var dataSourcesSection: some View {
     settingsSection("Data Sources") {
-      Grid(alignment: .leading, horizontalSpacing: 34, verticalSpacing: 8) {
-        GridRow {
-          sourceToggle("Claude Code", isOn: $model.includeClaude)
-          sourceToggle("Codex", isOn: $model.includeCodex)
-        }
-        GridRow {
-          sourceToggle("Pi", isOn: $model.includePi)
-          sourceToggle("Gemini", isOn: $model.includeGemini)
-        }
-        GridRow {
-          sourceToggle("OMP", isOn: $model.includeOMP)
-          sourceToggle("OpenCode", isOn: $model.includeOpenCode)
+      VStack(alignment: .leading, spacing: 10) {
+        helperText(
+          "Agents with priced usage in the past 30 days are discovered through agentsview. "
+            + "Turning one off hides it without stopping imports or deleting history."
+        )
+
+        if model.discoveredAgents.isEmpty {
+          if model.isRefreshing && !model.hasDiscoveryCache {
+            HStack(spacing: 8) {
+              ProgressView()
+                .controlSize(.small)
+              helperText("Discovering local agents…")
+            }
+          } else {
+            helperText("No agents with priced usage were found in the past 30 days.")
+          }
+        } else {
+          LazyVGrid(
+            columns: [
+              GridItem(.flexible(minimum: 150), alignment: .leading),
+              GridItem(.flexible(minimum: 150), alignment: .leading),
+            ],
+            alignment: .leading,
+            spacing: 8
+          ) {
+            ForEach(model.discoveredAgents) { agent in
+              sourceToggle(agent)
+            }
+          }
         }
       }
     }
@@ -189,10 +206,16 @@ struct SettingsView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
-  private func sourceToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(title, isOn: isOn)
-      .toggleStyle(.checkbox)
-      .frame(width: 150, alignment: .leading)
+  private func sourceToggle(_ agent: UsageAgent) -> some View {
+    Toggle(
+      agent.displayName,
+      isOn: Binding(
+        get: { model.isAgentEnabled(agent) },
+        set: { model.setAgent(agent, enabled: $0) }
+      )
+    )
+    .toggleStyle(.checkbox)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private func helperText(_ text: String) -> some View {

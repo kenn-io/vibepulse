@@ -7,7 +7,7 @@ enum UsageSeriesAggregation {
     return samplesByMachine.flatMap { machineName, samples in
       let samplesByDate = Dictionary(grouping: samples) { $0.recordedAt }
       let dates = samplesByDate.keys.sorted()
-      var highWaterByTool: [UsageTool: Double] = [:]
+      var highWaterByTool: [UsageAgent: Double] = [:]
       var runningTotal = 0.0
 
       return dates.map { date in
@@ -69,7 +69,7 @@ enum UsageSeriesAggregation {
     return samplesByModel.flatMap { modelName, samples in
       let samplesByDate = Dictionary(grouping: samples) { $0.recordedAt }
       let dates = samplesByDate.keys.sorted()
-      var highWaterByTool: [UsageTool: Double] = [:]
+      var highWaterByTool: [UsageAgent: Double] = [:]
       var runningTotal = 0.0
 
       return dates.map { date in

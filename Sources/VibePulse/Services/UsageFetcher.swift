@@ -1,6 +1,11 @@
 import Foundation
 
-final class UsageFetcher: @unchecked Sendable {
+protocol UsageFetching: Sendable {
+  func discoverAgents() throws -> [UsageAgent]
+  func fetchDailyTotals(for tool: UsageAgent) throws -> [DailyTotal]
+}
+
+final class UsageFetcher: UsageFetching, @unchecked Sendable {
   enum FetchError: Error {
     case commandFailed(String)
     case invalidOutput
@@ -13,24 +18,34 @@ final class UsageFetcher: @unchecked Sendable {
     self.commandRunner = commandRunner
   }
 
-  func fetchDailyTotals(for tool: UsageTool) throws -> [DailyTotal] {
-    // Retry transient failures so a refresh that lands while
-    // agentsview is mid-replace (self-update or reinstall) doesn't
-    // surface an error that sticks until the next scheduled refresh.
+  func discoverAgents() throws -> [UsageAgent] {
+    try withRetry {
+      let data = try executeCommand(UsageAgent.discoveryCommand)
+      return try Self.parseDiscoveredAgents(data: data)
+    }
+  }
+
+  func fetchDailyTotals(for tool: UsageAgent) throws -> [DailyTotal] {
+    try withRetry {
+      let data: Data
+      do {
+        data = try executeCommand(tool.dailyCommand)
+      } catch FetchError.commandFailed(let output)
+        where Self.isUnsupportedBreakdownError(output)
+      {
+        data = try executeCommand(tool.dailyCommand.filter { $0 != "--breakdown" })
+      }
+      return try Self.parseDailyTotals(data: data)
+    }
+  }
+
+  private func withRetry<T>(_ operation: () throws -> T) throws -> T {
     let maxAttempts = 3
     let retryDelay: TimeInterval = 0.3
 
     for attempt in 1...maxAttempts {
       do {
-        let data: Data
-        do {
-          data = try executeCommand(tool.dailyCommand)
-        } catch FetchError.commandFailed(let output)
-          where Self.isUnsupportedBreakdownError(output)
-        {
-          data = try executeCommand(tool.dailyCommand.filter { $0 != "--breakdown" })
-        }
-        return try Self.parseDailyTotals(data: data)
+        return try operation()
       } catch FetchError.agentsviewNotFound(let path) {
         throw FetchError.agentsviewNotFound(path)
       } catch {
@@ -41,8 +56,6 @@ final class UsageFetcher: @unchecked Sendable {
       }
     }
 
-    // Unreachable: the loop returns on success or throws on the
-    // final attempt, but the compiler can't prove it.
     throw FetchError.commandFailed("retry loop exhausted")
   }
 
@@ -196,6 +209,44 @@ final class UsageFetcher: @unchecked Sendable {
       }
     }
     return combined
+  }
+
+  static func parseDiscoveredAgents(data: Data) throws -> [UsageAgent] {
+    if let text = String(data: data, encoding: .utf8),
+      text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      throw FetchError.invalidOutput
+    }
+
+    guard
+      let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let dailyRows = root["daily"] as? [[String: Any]]
+    else {
+      throw FetchError.invalidOutput
+    }
+
+    var costByAgent: [String: Double] = [:]
+    for dailyRow in dailyRows {
+      guard let breakdowns = dailyRow["agentBreakdowns"] as? [[String: Any]] else {
+        throw FetchError.invalidOutput
+      }
+      for breakdown in breakdowns {
+        guard
+          let rawAgent = breakdown["agent"] as? String,
+          !rawAgent.isEmpty,
+          let cost = parseNumber(breakdown["cost"])
+        else {
+          throw FetchError.invalidOutput
+        }
+        costByAgent[rawAgent, default: 0] += cost
+      }
+    }
+
+    return
+      costByAgent
+      .filter { $0.value > 0 }
+      .map { UsageAgent($0.key) }
+      .sorted()
   }
 
   static func parseDailyTotals(data: Data) throws -> [DailyTotal] {

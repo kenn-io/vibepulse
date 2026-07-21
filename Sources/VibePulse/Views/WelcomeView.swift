@@ -10,9 +10,9 @@ struct WelcomeView: View {
         .font(.title2)
 
       Text(
-        "VibePulse reads your Claude Code, Codex, Pi, Gemini, OMP, and OpenCode usage"
-          + " via agentsview. Make sure agentsview is installed."
-          + " You can set a custom path in Settings."
+        "VibePulse reads local AI coding-agent usage through agentsview. "
+          + "Agents with priced usage in the past 30 days are discovered automatically. "
+          + "Make sure agentsview is installed; you can set a custom path in Settings."
       )
       .font(.callout)
       .foregroundColor(.secondary)

@@ -4,6 +4,35 @@ import XCTest
 @testable import VibePulse
 
 final class UsageStoreTests: XCTestCase {
+  func testStoreRoundTripsArbitraryAgentIdentifiers() throws {
+    let store = try UsageStore(path: ":memory:")
+    let agent = UsageAgent("future-agent")
+    let date = Date()
+    let dateKey = DateHelper.dateKey(for: date)
+
+    try store.upsertDailyTotals(
+      tool: agent,
+      totals: [DailyTotal(dateKey: dateKey, cost: 4.25)])
+    try store.insertSample(tool: agent, totalCost: 4.25, recordedAt: date)
+
+    XCTAssertEqual(store.dailyTotal(for: dateKey, tool: agent), 4.25)
+    XCTAssertEqual(
+      store.fetchSamples(tool: agent, from: Date.distantPast, to: Date.distantFuture).map(\.tool),
+      [agent])
+    XCTAssertEqual(store.fetchDailyRollups(since: dateKey).map(\.tool), [agent])
+  }
+
+  func testStoredAgentsIncludesUnknownAgentsFromPersistedUsage() throws {
+    let store = try UsageStore(path: ":memory:")
+    let agent = UsageAgent("future-agent")
+
+    try store.upsertDailyTotals(
+      tool: agent,
+      totals: [DailyTotal(dateKey: "2026-07-02", cost: 1)])
+
+    XCTAssertEqual(store.storedAgents(), [agent])
+  }
+
   func testSampleDeltaCalculation() throws {
     let store = try UsageStore(path: ":memory:")
     let calendar = Calendar.current
@@ -526,7 +555,7 @@ final class UsageStoreTests: XCTestCase {
   private func insertRawModelDailyRollup(
     path: String,
     dateKey: String,
-    tool: UsageTool,
+    tool: UsageAgent,
     modelName: String,
     totalCost: Double
   ) throws {
@@ -559,7 +588,7 @@ final class UsageStoreTests: XCTestCase {
   private func insertRawMachineDailyRollup(
     path: String,
     dateKey: String,
-    tool: UsageTool,
+    tool: UsageAgent,
     machineName: String,
     totalCost: Double
   ) throws {
@@ -651,7 +680,7 @@ final class UsageStoreTests: XCTestCase {
 
   private func createLegacyModelSamples(
     path: String,
-    samples: [(UsageTool, String, Date, Double)]
+    samples: [(UsageAgent, String, Date, Double)]
   ) throws {
     var db: OpaquePointer?
     guard sqlite3_open_v2(path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
@@ -701,7 +730,7 @@ final class UsageStoreTests: XCTestCase {
 
   private func createLegacyMachineSamples(
     path: String,
-    samples: [(UsageTool, String, Date, Double)]
+    samples: [(UsageAgent, String, Date, Double)]
   ) throws {
     var db: OpaquePointer?
     guard sqlite3_open_v2(path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK

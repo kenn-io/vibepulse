@@ -34,7 +34,7 @@ struct UsageChartView: View {
           )
           .interpolationMethod(.catmullRom)
           .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-          .foregroundStyle(by: .value("Series", point.series.displayName))
+          .foregroundStyle(by: .value("Series", point.series.chartIdentity))
         }
         .chartLegend(.hidden)
         .chartForegroundStyleScale(domain: colorDomain, range: colorRange)
@@ -75,14 +75,14 @@ struct UsageChartView: View {
                 x: .value("Date", point.date, unit: .day),
                 y: .value("Cost", point.cost)
               )
-              .foregroundStyle(by: .value("Series", point.series.displayName))
-              .position(by: .value("Series", point.series.displayName))
+              .foregroundStyle(by: .value("Series", point.series.chartIdentity))
+              .position(by: .value("Series", point.series.chartIdentity))
             } else {
               BarMark(
                 x: .value("Date", point.date, unit: .day),
                 y: .value("Cost", point.cost)
               )
-              .foregroundStyle(by: .value("Series", point.series.displayName))
+              .foregroundStyle(by: .value("Series", point.series.chartIdentity))
             }
           }
 
@@ -182,7 +182,7 @@ struct UsageChartView: View {
   }
 
   private var colorDomain: [String] {
-    chartSeries.map(\.displayName)
+    chartSeries.map(\.chartIdentity)
   }
 
   private var colorRange: [Color] {
