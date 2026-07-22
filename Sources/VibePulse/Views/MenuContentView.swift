@@ -7,6 +7,9 @@ struct MenuContentView: View {
   @State private var chartMode: ChartMode = .today
   @State private var aggregationMode: UsageAggregationMode = .agent
 
+  private let legendRowHeight: CGFloat = 28
+  private let legendRowSpacing: CGFloat = 8
+
   var body: some View {
     let palette = seriesPalette
 
@@ -125,24 +128,29 @@ struct MenuContentView: View {
     }
   }
 
-  @ViewBuilder
   private func totalsBreakdown(palette: UsageSeriesPalette) -> some View {
-    if toolBreakdown.count > 8 {
-      ScrollView(.vertical) {
-        totalsGrid(palette: palette)
-      }
-      .frame(height: 132)
-    } else {
+    ScrollView(.vertical) {
       totalsGrid(palette: palette)
     }
+    .scrollIndicators(
+      toolBreakdown.count > UsageLegendLayout.maximumVisibleItems ? .visible : .hidden
+    )
+    .frame(height: legendHeight)
   }
 
   private func totalsGrid(palette: UsageSeriesPalette) -> some View {
-    LazyVGrid(columns: legendColumns, alignment: .leading, spacing: 8) {
+    LazyVGrid(columns: legendColumns, alignment: .leading, spacing: legendRowSpacing) {
       ForEach(toolBreakdown) { total in
         ToolTotalLegendItem(total: total, color: palette.color(for: total.series))
+          .frame(height: legendRowHeight, alignment: .topLeading)
       }
     }
+  }
+
+  private var legendHeight: CGFloat {
+    let rows = UsageLegendLayout.visibleRowCount(for: toolBreakdown.count)
+    guard rows > 0 else { return 0 }
+    return CGFloat(rows) * legendRowHeight + CGFloat(rows - 1) * legendRowSpacing
   }
 
   private var legendColumns: [GridItem] {
@@ -206,20 +214,21 @@ struct MenuContentView: View {
   }
 
   private var toolBreakdown: [ToolTotal] {
+    let totals: [ToolTotal]
     switch chartMode {
     case .today:
-      return selectedTotals.filter { $0.totalCost > 0.0001 }
+      totals = selectedTotals.filter { $0.totalCost > 0.0001 }
     case .sevenDays, .thirtyDays:
       var totalsBySeries: [UsageSeriesKey: Double] = [:]
       for point in visibleDailySeries {
         totalsBySeries[point.series, default: 0] += point.cost
       }
-      return totalsBySeries.compactMap { series, total in
+      totals = totalsBySeries.compactMap { series, total in
         guard total > 0.0001 else { return nil }
         return ToolTotal(series: series, totalCost: total)
       }
-      .sorted { $0.series.sortKey < $1.series.sortKey }
     }
+    return UsageLegendLayout.sortedTotals(totals)
   }
 
   private var selectedCumulativeSeries: [UsageSeriesPoint] {
