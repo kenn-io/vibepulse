@@ -222,6 +222,37 @@ final class UsageRefreshServiceTests: XCTestCase {
     XCTAssertEqual(samples.map(\.totalCost), [7])
   }
 
+  func testRefreshFetchesMachineLabelsOncePerCycle() throws {
+    let labels = MachineLabels(
+      serverURL: "http://127.0.0.1:18080",
+      labels: ["installation-a": "Laptop"])
+    let fetcher = StubUsageFetcher(
+      discoveredAgents: [UsageAgent("future-agent"), UsageAgent("other-agent")],
+      machineLabels: labels)
+    let service = UsageRefreshService(fetcher: fetcher, store: try UsageStore(path: ":memory:"))
+
+    let result = try service.refresh(context: testContext())
+
+    XCTAssertEqual(result.machineLabels, labels)
+    XCTAssertEqual(fetcher.machineLabelRequestCount, 1)
+  }
+
+  func testRefreshImportsUsageWhenMachineLabelsAreUnavailable() throws {
+    let agent = UsageAgent("future-agent")
+    let fetcher = StubUsageFetcher(
+      discoveredAgents: [agent],
+      totalsByAgent: [agent: [DailyTotal(dateKey: "2026-07-17", cost: 2)]],
+      machineLabelsError: StubError.importFailed)
+    let store = try UsageStore(path: ":memory:")
+    let service = UsageRefreshService(fetcher: fetcher, store: store)
+
+    let result = try service.refresh(context: testContext())
+
+    XCTAssertNil(result.machineLabels)
+    XCTAssertEqual(result.importErrors, [])
+    XCTAssertEqual(store.dailyTotal(for: "2026-07-17", tool: agent), 2)
+  }
+
   private func testContext() -> UsageDateContext {
     UsageDateContext(
       now: ISO8601DateFormatter().date(from: "2026-07-17T12:00:00Z")!,
@@ -246,6 +277,9 @@ private final class StubUsageFetcher: UsageFetching, @unchecked Sendable {
   private let totalsByAgent: [UsageAgent: [DailyTotal]]
   private let failingAgents: Set<UsageAgent>
   private let discoveryError: Error?
+  private let machineLabels: MachineLabels?
+  private let machineLabelsError: Error?
+  private(set) var machineLabelRequestCount = 0
   private(set) var requestedAgents: [UsageAgent] = []
   private(set) var requestedTimeZones: [String] = []
 
@@ -253,12 +287,22 @@ private final class StubUsageFetcher: UsageFetching, @unchecked Sendable {
     discoveredAgents: [UsageAgent] = [],
     totalsByAgent: [UsageAgent: [DailyTotal]] = [:],
     failingAgents: Set<UsageAgent> = [],
-    discoveryError: Error? = nil
+    discoveryError: Error? = nil,
+    machineLabels: MachineLabels? = nil,
+    machineLabelsError: Error? = nil
   ) {
     self.discoveredAgents = discoveredAgents
     self.totalsByAgent = totalsByAgent
     self.failingAgents = failingAgents
     self.discoveryError = discoveryError
+    self.machineLabels = machineLabels
+    self.machineLabelsError = machineLabelsError
+  }
+
+  func fetchMachineLabels() throws -> MachineLabels? {
+    machineLabelRequestCount += 1
+    if let machineLabelsError { throw machineLabelsError }
+    return machineLabels
   }
 
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {

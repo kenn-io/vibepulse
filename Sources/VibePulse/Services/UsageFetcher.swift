@@ -6,6 +6,7 @@ protocol UsageFetching: Sendable {
     for tool: UsageAgent,
     using context: UsageDateContext
   ) throws -> [DailyTotal]
+  func fetchMachineLabels() throws -> MachineLabels?
 }
 
 final class UsageFetcher: UsageFetching, @unchecked Sendable {
@@ -62,14 +63,28 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     }
   }
 
+  // Labels come only from the configured server; CLI-only mode has none.
+  func fetchMachineLabels() throws -> MachineLabels? {
+    let serverURL = Self.normalizedServerURL(configuredServerURL)
+    guard !serverURL.isEmpty else { return nil }
+
+    let data = try Data(contentsOf: Self.makeMachinesURL(configuredURL: serverURL))
+    return MachineLabels(
+      serverURL: serverURL,
+      labels: try Self.parseMachineLabels(data: data))
+  }
+
+  private var configuredServerURL: String {
+    UserDefaults.standard.string(forKey: "agentsviewServerURL")?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  }
+
   private func fetchUsageData(
     command: [String],
     agent: String?,
     context: UsageDateContext
   ) throws -> Data {
-    let configuredURL =
-      UserDefaults.standard.string(forKey: "agentsviewServerURL")?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let configuredURL = configuredServerURL
     guard !configuredURL.isEmpty else {
       return try executeAgentsviewCommand(command)
     }
@@ -82,13 +97,26 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     return try Data(contentsOf: url)
   }
 
+  static func normalizedServerURL(_ configuredURL: String) -> String {
+    configuredURL
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+  }
+
+  static func makeMachinesURL(configuredURL: String) throws -> URL {
+    guard let url = URL(string: normalizedServerURL(configuredURL) + "/api/v1/machines") else {
+      throw FetchError.invalidServerURL(configuredURL)
+    }
+    return url
+  }
+
   static func makeServerURL(
     configuredURL: String,
     agent: String?,
     now: Date,
     timeZone: TimeZone
   ) throws -> URL {
-    let baseURL = configuredURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let baseURL = normalizedServerURL(configuredURL)
     guard
       var components = URLComponents(
         string: baseURL + "/api/v1/usage/summary")
@@ -357,6 +385,14 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       .filter { $0.value > 0 }
       .map { UsageAgent($0.key) }
       .sorted()
+  }
+
+  static func parseMachineLabels(data: Data) throws -> [String: String] {
+    guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw FetchError.invalidOutput
+    }
+    let labels = root["machine_labels"] as? [String: Any] ?? [:]
+    return labels.compactMapValues { $0 as? String }
   }
 
   static func parseDailyTotals(data: Data) throws -> [DailyTotal] {

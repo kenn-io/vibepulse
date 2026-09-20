@@ -26,7 +26,8 @@ struct MenuContentView: View {
         mode: chartMode,
         cumulativeSeries: visibleCumulativeSeries,
         dailySeries: visibleDailySeries,
-        palette: palette)
+        palette: palette,
+        machineLabels: model.machineLabels)
 
       totalsBreakdown(palette: palette)
 
@@ -141,8 +142,12 @@ struct MenuContentView: View {
   private func totalsGrid(palette: UsageSeriesPalette) -> some View {
     LazyVGrid(columns: legendColumns, alignment: .leading, spacing: legendRowSpacing) {
       ForEach(toolBreakdown) { total in
-        ToolTotalLegendItem(total: total, color: palette.color(for: total.series))
-          .frame(height: legendRowHeight, alignment: .topLeading)
+        ToolTotalLegendItem(
+          total: total,
+          color: palette.color(for: total.series),
+          machineLabels: model.machineLabels
+        )
+        .frame(height: legendRowHeight, alignment: .topLeading)
       }
     }
   }
@@ -174,6 +179,7 @@ struct MenuContentView: View {
       Button("Check for Updates\u{2026}") {
         updaterController.checkForUpdates()
       }
+      .disabled(!updaterController.isAvailable)
 
       Spacer()
 
@@ -284,6 +290,7 @@ struct MenuContentView: View {
 private struct ToolTotalLegendItem: View {
   let total: ToolTotal
   let color: Color
+  let machineLabels: [String: String]
 
   var body: some View {
     HStack(alignment: .top, spacing: 6) {
@@ -293,7 +300,7 @@ private struct ToolTotalLegendItem: View {
         .padding(.top, 4)
 
       VStack(alignment: .leading, spacing: 1) {
-        Text(total.series.displayName)
+        Text(total.series.displayName(machineLabels: machineLabels))
           .lineLimit(1)
           .truncationMode(.middle)
           .minimumScaleFactor(0.85)
