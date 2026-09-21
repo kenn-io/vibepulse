@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
       )
     }
   }
+  @Published private(set) var machineLabelSnapshot: MachineLabels?
   @Published private(set) var discoveredAgents: [UsageAgent]
   @Published private(set) var disabledAgentIDs: Set<String>
 
@@ -96,6 +97,9 @@ final class AppModel: ObservableObject {
       defaults.string(forKey: DefaultsKey.agentsviewPath) ?? ""
     agentsviewServerURL =
       defaults.string(forKey: DefaultsKey.agentsviewServerURL) ?? ""
+    machineLabelSnapshot = defaults.data(forKey: DefaultsKey.machineLabels).flatMap {
+      try? JSONDecoder().decode(MachineLabels.self, from: $0)
+    }
     startAtLogin = Self.currentLoginItemEnabled()
 
     if SMAppService.mainApp.status == .requiresApproval {
@@ -170,6 +174,11 @@ final class AppModel: ObservableObject {
 
           self.discoveredAgents = result.discoveredAgents
           self.agentPreferences.saveDiscoveredAgents(result.discoveredAgents)
+          if let machineLabels = result.machineLabels {
+            self.machineLabelSnapshot = machineLabels
+            self.defaults.set(
+              try? JSONEncoder().encode(machineLabels), forKey: DefaultsKey.machineLabels)
+          }
           if result.importErrors.isEmpty {
             self.statusMessage = nil
             self.lastUpdated = refreshTime
@@ -246,6 +255,12 @@ final class AppModel: ObservableObject {
 
   func openSettings() {
     settingsWindowController.show(model: self)
+  }
+
+  // The snapshot remembers its server, so labels from a previously configured
+  // server are never shown against the current one.
+  var machineLabels: [String: String] {
+    machineLabelSnapshot?.labels(forConfiguredServerURL: agentsviewServerURL) ?? [:]
   }
 
   var hasDiscoveryCache: Bool {
@@ -523,6 +538,7 @@ final class AppModel: ObservableObject {
     static let refreshInterval = "refreshInterval"
     static let agentsviewPath = "agentsviewPath"
     static let agentsviewServerURL = "agentsviewServerURL"
+    static let machineLabels = "machineLabels"
     static let maintenanceMode = "maintenanceMode"
     static let lastMaintenanceAt = "lastMaintenanceAt"
     static let lastUsageTimeZone = "lastUsageTimeZone"

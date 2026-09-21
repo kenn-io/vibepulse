@@ -36,6 +36,52 @@ final class UsageFetcherTests: XCTestCase {
       "claude")
   }
 
+  func testMachinesURLUsesConfiguredServerBase() throws {
+    let url = try UsageFetcher.makeMachinesURL(configuredURL: "http://127.0.0.1:18080/")
+
+    XCTAssertEqual(url.absoluteString, "http://127.0.0.1:18080/api/v1/machines")
+  }
+
+  func testParseMachineLabelsMapsStableIDsToLabels() throws {
+    let json = """
+      {
+        "machines": ["installation-a", "installation-b"],
+        "machine_labels": {
+          "installation-a": "Laptop",
+          "installation-b": "Workstation"
+        },
+        "machine_aliases": {}
+      }
+      """
+
+    let labels = try UsageFetcher.parseMachineLabels(data: Data(json.utf8))
+
+    XCTAssertEqual(
+      labels, ["installation-a": "Laptop", "installation-b": "Workstation"])
+  }
+
+  func testParseMachineLabelsTreatsMissingLabelsAsEmpty() throws {
+    let json = """
+      {"machines": ["installation-a"]}
+      """
+
+    XCTAssertEqual(try UsageFetcher.parseMachineLabels(data: Data(json.utf8)), [:])
+  }
+
+  func testParseMachineLabelsSkipsNonStringLabels() throws {
+    let json = """
+      {"machine_labels": {"installation-a": "Laptop", "installation-b": null}}
+      """
+
+    XCTAssertEqual(
+      try UsageFetcher.parseMachineLabels(data: Data(json.utf8)),
+      ["installation-a": "Laptop"])
+  }
+
+  func testParseMachineLabelsRejectsNonObjectResponse() {
+    XCTAssertThrowsError(try UsageFetcher.parseMachineLabels(data: Data("[]".utf8)))
+  }
+
   func testFetchDailyTotalsRetriesWithoutBreakdownWhenFlagIsUnsupported() throws {
     let json = """
       {

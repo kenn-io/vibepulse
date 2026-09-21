@@ -7,6 +7,7 @@ struct UsageChartView: View {
   let cumulativeSeries: [UsageSeriesPoint]
   let dailySeries: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
+  let machineLabels: [String: String]
 
   @State private var dailyHoverDate: Date?
   @State private var dailyTooltipPosition: CGPoint?
@@ -126,7 +127,8 @@ struct UsageChartView: View {
             DailyTooltipView(
               date: dailyHoverDate,
               points: dailyHoverPoints,
-              palette: palette
+              palette: palette,
+              machineLabels: machineLabels
             )
             .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
           }
@@ -195,6 +197,7 @@ private struct DailyTooltipView: View {
   let date: Date
   let points: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
+  let machineLabels: [String: String]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -238,7 +241,7 @@ private struct DailyTooltipView: View {
       Circle()
         .fill(palette.color(for: point.series))
         .frame(width: 8, height: 8)
-      Text(point.series.displayName)
+      Text(point.series.displayName(machineLabels: machineLabels))
         .lineLimit(1)
         .truncationMode(.middle)
       Spacer(minLength: 8)

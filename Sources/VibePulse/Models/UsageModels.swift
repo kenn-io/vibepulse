@@ -96,6 +96,15 @@ struct UsageSeriesKey: Hashable, Identifiable {
     }
   }
 
+  // Labels only change display text; `value` stays the stable machine ID
+  // used for storage, grouping, selection, and chart identity.
+  func displayName(machineLabels: [String: String]) -> String {
+    guard kind == .machine, let label = machineLabels[value], !label.isEmpty else {
+      return displayName
+    }
+    return label
+  }
+
   var chartIdentity: String { id }
 
   var sortKey: String {
@@ -173,6 +182,15 @@ enum RefreshInterval: String, CaseIterable, Identifiable {
     case .oneDay:
       return 24 * 60 * 60
     }
+  }
+}
+
+struct MachineLabels: Codable, Equatable, Sendable {
+  let serverURL: String
+  let labels: [String: String]
+
+  func labels(forConfiguredServerURL configuredURL: String) -> [String: String] {
+    serverURL == UsageFetcher.normalizedServerURL(configuredURL) ? labels : [:]
   }
 }
 

@@ -3,6 +3,7 @@ import Foundation
 struct UsageRefreshResult: Sendable {
   let discoveredAgents: [UsageAgent]
   let importErrors: [String]
+  let machineLabels: MachineLabels?
 }
 
 final class UsageRefreshService: @unchecked Sendable {
@@ -24,6 +25,8 @@ final class UsageRefreshService: @unchecked Sendable {
     }
 
     let agents = try fetcher.discoverAgents(using: context).sorted()
+    // Labels are display-only, so a failed request must not block usage.
+    let machineLabels = try? fetcher.fetchMachineLabels()
     var errors: [String] = []
 
     for agent in agents {
@@ -66,6 +69,7 @@ final class UsageRefreshService: @unchecked Sendable {
 
     return UsageRefreshResult(
       discoveredAgents: agents,
-      importErrors: errors)
+      importErrors: errors,
+      machineLabels: machineLabels)
   }
 }
