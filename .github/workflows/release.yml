@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build-macos:
     name: Build Signed DMG
-    runs-on: macos-15
+    runs-on: namespace-profile-mac-6cpu
     permissions:
       contents: write
     steps:
