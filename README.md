@@ -68,7 +68,7 @@ VibePulse runs outside your shell, so if `agentsview` is installed to a non-stan
 - All usage data stays local on your machine.
 - The database lives at `~/Library/Application Support/VibePulse/vibepulse.sqlite`.
 - VibePulse has no analytics or telemetry.
-- It runs one aggregate 30-day agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Reports come from the configured server when present, otherwise from the local CLI. With a server configured, it also reads that server's machine labels so the Machine view shows names instead of installation IDs.
+- It runs one aggregate 30-day agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Reports come from the configured server when present, otherwise from the local CLI. The Machine view uses labels from the CLI report or the configured server to show names instead of installation IDs.
 
 ## Troubleshooting
 

@@ -19,6 +19,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   }
 
   private let commandRunner: (([String]) throws -> Data)?
+  private var cliMachineLabels: MachineLabels?
 
   init(commandRunner: (([String]) throws -> Data)? = nil) {
     self.commandRunner = commandRunner
@@ -30,7 +31,12 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
         command: UsageAgent.discoveryCommand(in: context.timeZone),
         agent: nil,
         context: context)
-      return try Self.parseDiscoveredAgents(data: data)
+      let agents = try Self.parseDiscoveredAgents(data: data)
+      if configuredServerURL.isEmpty {
+        cliMachineLabels = MachineLabels(
+          serverURL: "", labels: (try? Self.parseMachineLabels(data: data)) ?? [:])
+      }
+      return agents
     }
   }
 
@@ -63,10 +69,10 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     }
   }
 
-  // Labels come only from the configured server; CLI-only mode has none.
+  // CLI labels arrive with discovery; server labels include machines outside the usage window.
   func fetchMachineLabels() throws -> MachineLabels? {
     let serverURL = Self.normalizedServerURL(configuredServerURL)
-    guard !serverURL.isEmpty else { return nil }
+    guard !serverURL.isEmpty else { return cliMachineLabels }
 
     let data = try Data(contentsOf: Self.makeMachinesURL(configuredURL: serverURL))
     return MachineLabels(
