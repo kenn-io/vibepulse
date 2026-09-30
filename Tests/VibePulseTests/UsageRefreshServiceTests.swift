@@ -237,6 +237,34 @@ final class UsageRefreshServiceTests: XCTestCase {
     XCTAssertEqual(fetcher.machineLabelRequestCount, 1)
   }
 
+  func testCLIRefreshDisplaysMachineLabelAndPreservesIdentity() throws {
+    let report = """
+      {
+        "machine_labels": {"installation-a": "Laptop"},
+        "daily": [{
+          "date": "2026-07-17",
+          "totalCost": 7,
+          "agentBreakdowns": [{"agent": "claude", "cost": 7}],
+          "machineBreakdowns": [{"machineName": "installation-a", "cost": 7}]
+        }]
+      }
+      """
+    let fetcher = UsageFetcher(commandRunner: { _ in Data(report.utf8) })
+    let store = try UsageStore(path: ":memory:")
+    let service = UsageRefreshService(fetcher: fetcher, store: store)
+    let context = testContext()
+
+    let result = try service.refresh(context: context)
+    let labels = result.machineLabels?.labels(forConfiguredServerURL: "") ?? [:]
+    let rollups = store.fetchMachineDailyRollups(
+      since: context.todayKey, tools: [.claude], timeZone: context.timeZone)
+    let totals = UsageSeriesAggregation.machineTotals(from: rollups, dateKey: context.todayKey)
+
+    XCTAssertEqual(totals.map { $0.series.displayName(machineLabels: labels) }, ["Laptop"])
+    XCTAssertEqual(totals.map(\.series.value), ["installation-a"])
+    XCTAssertEqual(totals.map(\.totalCost), [7])
+  }
+
   func testRefreshImportsUsageWhenMachineLabelsAreUnavailable() throws {
     let agent = UsageAgent("future-agent")
     let fetcher = StubUsageFetcher(
