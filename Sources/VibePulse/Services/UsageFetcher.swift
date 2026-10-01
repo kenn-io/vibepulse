@@ -290,7 +290,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       throw FetchError.agentsviewNotFound(override)
     }
 
-    if let resolved = resolveAgentsviewExecutable() {
+    if let resolved = Self.resolveAgentsviewExecutable() {
       return (
         URL(fileURLWithPath: resolved),
         Array(arguments.dropFirst())
@@ -300,20 +300,11 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     throw FetchError.agentsviewNotFound(nil)
   }
 
-  private func resolveAgentsviewExecutable() -> String? {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let candidates = [
-      "\(home)/.local/bin/agentsview",
-      "/usr/local/bin/agentsview",
-      "/opt/homebrew/bin/agentsview",
-    ]
-    for path in candidates {
-      if FileManager.default.isExecutableFile(atPath: path) {
-        return path
-      }
-    }
-
-    let paths = buildSearchPaths()
+  static func resolveAgentsviewExecutable(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> String? {
+    let paths = buildSearchPaths(home: home, environment: environment)
     for directory in paths {
       let path =
         (directory as NSString).appendingPathComponent("agentsview")
@@ -327,23 +318,26 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
 
   private func buildEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
-    environment["PATH"] = buildSearchPaths().joined(separator: ":")
+    environment["PATH"] = Self.buildSearchPaths().joined(separator: ":")
     return environment
   }
 
-  private func buildSearchPaths() -> [String] {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
+  private static func buildSearchPaths(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> [String] {
     let defaultPaths = [
+      "\(home)/.local/share/mise/shims",
       "\(home)/.local/bin",
-      "/opt/homebrew/bin",
       "/usr/local/bin",
+      "/opt/homebrew/bin",
       "/usr/bin",
       "/bin",
       "/usr/sbin",
       "/sbin",
     ]
     let existing =
-      ProcessInfo.processInfo.environment["PATH"]?
+      environment["PATH"]?
       .split(separator: ":").map(String.init) ?? []
     var combined: [String] = []
     for path in defaultPaths + existing {
