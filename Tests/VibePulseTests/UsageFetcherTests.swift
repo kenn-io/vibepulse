@@ -3,6 +3,25 @@ import XCTest
 @testable import VibePulse
 
 final class UsageFetcherTests: XCTestCase {
+  func testFindsMiseShimBeforeStandaloneBinaryWithoutShellPath() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: home) }
+    let shim = home.appendingPathComponent(".local/share/mise/shims/agentsview")
+    let standalone = home.appendingPathComponent(".local/bin/agentsview")
+    for executable in [shim, standalone] {
+      try FileManager.default.createDirectory(
+        at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755], ofItemAtPath: executable.path)
+    }
+
+    let resolved = UsageFetcher.resolveAgentsviewExecutable(
+      home: home.path, environment: ["PATH": "/usr/bin:/bin"])
+
+    XCTAssertEqual(resolved, shim.path)
+  }
+
   func testServerURLConstrainsDiscoveryAndAgentRequestsToThirtyDays() throws {
     let now = try XCTUnwrap(
       ISO8601DateFormatter().date(from: "2026-08-10T12:00:00Z"))

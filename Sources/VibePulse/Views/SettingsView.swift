@@ -112,7 +112,7 @@ struct SettingsView: View {
             .disabled(model.agentsviewPath.isEmpty)
           }
 
-          helperText("Used when no agentsview server is configured.")
+          helperText("Executable file path. Leave blank to auto-detect, including mise.")
         }
       }
     }

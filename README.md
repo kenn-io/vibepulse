@@ -51,6 +51,8 @@ This installs `agentsview` to `~/.local/bin/agentsview` or `/usr/local/bin/agent
 
 VibePulse runs outside your shell, so if `agentsview` is installed to a non-standard location, set the path in **Settings -> Dependencies**. To read from a PostgreSQL-backed `agentsview pg serve` instance instead, set its URL there; for example, `http://127.0.0.1:18080`.
 
+For mise installations, VibePulse automatically checks `~/.local/share/mise/shims/agentsview` before standalone installations. The shim follows your mise-selected version as it changes. If you set the path manually, enter the absolute path to the shim, expanding `~` to your home directory. The field accepts an executable file path; shell commands such as `mise exec -- agentsview` belong in a terminal.
+
 ## Settings
 
 <p align="center">
