@@ -1,3 +1,8 @@
+---
+title: Dynamic agentsview Agent Discovery Implementation Plan
+description: Implementation plan for usage-driven agent discovery, dynamic imports and preferences, legacy toggle migration, and focused verification.
+last_edited: 2026-07-21
+---
 # Dynamic agentsview Agent Discovery Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

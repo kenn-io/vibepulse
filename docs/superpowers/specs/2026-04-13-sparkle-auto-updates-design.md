@@ -1,3 +1,8 @@
+---
+title: Sparkle auto-updates for VibePulse
+description: Design for signed Sparkle automatic updates in VibePulse, covering app bundle integration, appcast delivery, key management, and release validation.
+last_edited: 2026-04-13
+---
 # Sparkle auto-updates for VibePulse
 
 **Status:** Draft for review

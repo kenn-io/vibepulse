@@ -1,3 +1,8 @@
+---
+title: Local release (signed + notarized)
+description: Prerequisites and commands for building, signing, notarizing, and publishing local VibePulse releases, with troubleshooting guidance.
+last_edited: 2025-12-29
+---
 # Local release (signed + notarized)
 
 This project ships releases locally to avoid CI/CD credentials.

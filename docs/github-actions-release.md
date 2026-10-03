@@ -1,3 +1,8 @@
+---
+title: GitHub Actions release setup
+description: Set up Apple signing, notarization, and Sparkle update credentials for the GitHub Actions release workflow, with rotation and troubleshooting guidance.
+last_edited: 2026-07-06
+---
 # GitHub Actions release setup
 
 This doc covers the one-time setup for the `.github/workflows/release.yml`

@@ -1,3 +1,8 @@
+---
+title: Sparkle Auto-Updates Implementation Plan
+description: Implementation steps for Sparkle automatic updates, including framework embedding, signed appcasts, release workflows, and end-to-end verification.
+last_edited: 2026-04-13
+---
 # Sparkle Auto-Updates Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

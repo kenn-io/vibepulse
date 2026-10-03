@@ -1,3 +1,8 @@
+---
+title: Scrollable Value-Sorted Legend Implementation Plan
+description: Implementation plan for sorting usage legend entries by cost and scrolling a two-column layout beyond sixteen entries.
+last_edited: 2026-07-22
+---
 # Scrollable Value-Sorted Legend Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

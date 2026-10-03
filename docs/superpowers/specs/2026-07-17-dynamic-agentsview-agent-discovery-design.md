@@ -1,3 +1,8 @@
+---
+title: Dynamic agentsview agent discovery for VibePulse
+description: Design for discovering agents with priced usage in agentsview reports and preserving imports and history when agents are hidden.
+last_edited: 2026-07-21
+---
 # Dynamic agentsview agent discovery for VibePulse
 
 **Status:** Approved design, pending written-spec review

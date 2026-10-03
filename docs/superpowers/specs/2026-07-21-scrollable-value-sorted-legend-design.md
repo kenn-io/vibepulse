@@ -1,3 +1,8 @@
+---
+title: Scrollable value-sorted usage legend
+description: Design for a cost-sorted, two-column usage legend that expands to sixteen entries and scrolls additional series.
+last_edited: 2026-07-22
+---
 # Scrollable value-sorted usage legend
 
 **Status:** Approved for implementation
