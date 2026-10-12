@@ -50,8 +50,7 @@ keychain, signs the `.app` bundle, then deletes the keychain.
 
 ### Step 2: Create the certificate on Apple's portal
 
-1. Go to
-   [developer.apple.com/account/resources/certificates/list](https://developer.apple.com/account/resources/certificates/list)
+1. Go to `https://developer.apple.com/account/resources/certificates/list`
 1. Click **+**
 1. Under "Software", select **Developer ID Application** (not "Mac App
    Distribution" or "Apple Development")
@@ -90,7 +89,7 @@ The quoted string is `APPLE_SIGNING_IDENTITY`.
 ### Secrets
 
 | Secret                       | Value                                              |
-| ---------------------------- | -------------------------------------------------- |
+| ---------------------------- | --------------------------------------------------- |
 | `APPLE_CERTIFICATE`          | Base64-encoded `.p12` (3000–5000 chars)            |
 | `APPLE_CERTIFICATE_PASSWORD` | Password from step 3                               |
 | `APPLE_SIGNING_IDENTITY`     | `Developer ID Application: Your Name (TEAMID)`     |
@@ -103,8 +102,7 @@ workflow uses an App Store Connect API key to authenticate with `notarytool`.
 
 ### Step 1: Create the API key
 
-1. Go to
-   [appstoreconnect.apple.com/access/integrations/api](https://appstoreconnect.apple.com/access/integrations/api)
+1. Go to `https://appstoreconnect.apple.com/access/integrations/api`
 1. Note the **Issuer ID** (UUID at the top of the page) → `APPLE_API_ISSUER`
 1. Click **Generate API Key** (or **+**)
 1. Name: `VibePulse Notarization`
@@ -130,7 +128,7 @@ This becomes `APPLE_API_KEY_CONTENT`.
 ### Secrets
 
 | Secret                  | Value                                  |
-| ----------------------- | -------------------------------------- |
+| ----------------------- | --------------------------------------- |
 | `APPLE_API_KEY_CONTENT` | Base64-encoded `.p8` (~400 chars)      |
 | `APPLE_API_KEY`         | Key ID (10 chars, e.g. `ABC123DEF0`)   |
 | `APPLE_API_ISSUER`      | Issuer UUID from the API keys page     |
@@ -172,14 +170,14 @@ via `sign_update`; the public key is embedded in the app's `Info.plist`.
 ### Secret
 
 | Secret                    | Value                              |
-| ------------------------- | ---------------------------------- |
+| ------------------------- | --------------------------------------- |
 | `SPARKLE_ED_PRIVATE_KEY`  | Ed25519 private key (base64, ~90 chars) |
 
 ### Key rotation
 
-See `docs/superpowers/specs/2026-04-13-sparkle-auto-updates-design.md`,
-section "Key rotation" for the planned-rotation and compromised-key
-recovery procedures.
+See [`docs/design/sparkle-auto-updates.md`](design/sparkle-auto-updates.md),
+section "Key management and rotation" for the planned-rotation and
+compromised-key recovery procedures.
 
 ## Setting the secrets
 
@@ -217,7 +215,7 @@ Expected: seven rows with the names above.
    git tag -a v0.2.0 -m "Release v0.2.0"
    git push origin v0.2.0
    ```
-1. Watch the run: `gh run watch` or
+1. Watch the run: `gh run watch` or the
    [actions page](https://github.com/kenn-io/vibepulse/actions/workflows/release.yml).
 1. On success, the release appears at
    [Releases](https://github.com/kenn-io/vibepulse/releases) with the DMG and
