@@ -4,7 +4,6 @@ import ServiceManagement
 @MainActor
 final class AppModel: ObservableObject {
   @Published var menuTotalText: String = Formatters.currencyString(0)
-  @Published var hourlySeries: [UsageSeriesPoint] = []
   @Published var cumulativeSeries: [UsageSeriesPoint] = []
   @Published var dailySeries: [UsageSeriesPoint] = []
   @Published var toolTotals: [ToolTotal] = []
@@ -232,7 +231,6 @@ final class AppModel: ObservableObject {
 
   private func clearPublishedUsage() {
     menuTotalText = Formatters.currencyString(0)
-    hourlySeries = []
     cumulativeSeries = []
     dailySeries = []
     toolTotals = []
@@ -291,28 +289,10 @@ final class AppModel: ObservableObject {
     let tools = activeTools
     let startOfDay = context.startOfToday
     let now = context.now
-    var hourlyPoints: [UsageSeriesPoint] = []
-
-    for tool in tools {
-      let samples = store.fetchSamples(tool: tool, from: startOfDay, to: now).sorted {
-        $0.recordedAt < $1.recordedAt
-      }
-      hourlyPoints.append(
-        contentsOf: HourlyUsageInferer.inferPoints(
-          tool: tool,
-          samples: samples,
-          startOfDay: startOfDay,
-          end: now,
-          calendar: context.calendar))
-    }
-
-    hourlySeries = hourlyPoints.sorted { $0.date < $1.date }
     var cumulativePoints: [UsageSeriesPoint] = []
 
     for tool in tools {
-      let samples = store.fetchSamples(tool: tool, from: startOfDay, to: now).sorted {
-        $0.recordedAt < $1.recordedAt
-      }
+      let samples = store.fetchSamples(tool: tool, from: startOfDay, to: now)
       cumulativePoints.append(
         contentsOf: samples.map {
           UsageSeriesPoint(tool: tool, date: $0.recordedAt, cost: $0.totalCost)
@@ -361,11 +341,11 @@ final class AppModel: ObservableObject {
     var totals: [ToolTotal] = []
     for tool in tools {
       let dailyTotal = store.dailyTotal(for: context.todayKey, tool: tool)
-      let sampleTotal = store.latestSample(
-        tool: tool,
-        from: context.startOfToday,
-        to: context.startOfNextDay)?.totalCost
-      let totalCost = dailyTotal ?? sampleTotal ?? 0
+      let totalCost =
+        dailyTotal ?? store.latestSample(
+          tool: tool,
+          from: context.startOfToday,
+          to: context.startOfNextDay)?.totalCost ?? 0
       totals.append(ToolTotal(tool: tool, totalCost: totalCost))
     }
     toolTotals = totals

@@ -3,6 +3,33 @@ import XCTest
 @testable import VibePulse
 
 final class UsageRefreshServiceTests: XCTestCase {
+  func testRefreshOverlapsAtMostTwoReportsAndImportsAfterFetchFailure() throws {
+    let firstPairStarted = expectation(description: "two reports started")
+    let refreshFinished = expectation(description: "refresh finished")
+    let fetcher = BlockingUsageFetcher(firstPairStarted: firstPairStarted)
+    let store = try UsageStore(path: ":memory:")
+    let service = UsageRefreshService(fetcher: fetcher, store: store)
+    let context = testContext()
+
+    DispatchQueue.global().async {
+      defer { refreshFinished.fulfill() }
+      do {
+        let result = try service.refresh(context: context)
+        XCTAssertEqual(result.importErrors, ["Agent A: import failed", "Agent C: import failed"])
+      } catch {
+        XCTFail("Unexpected discovery failure: \(error)")
+      }
+    }
+    wait(for: [firstPairStarted], timeout: 3)
+    // Release every request, including queued work, even if the overlap assertion fails.
+    for _ in 0..<4 { fetcher.release.signal() }
+    wait(for: [refreshFinished], timeout: 5)
+
+    XCTAssertEqual(fetcher.maximumActive, 2)
+    XCTAssertEqual(store.dailyTotal(for: context.todayKey, tool: UsageAgent("agent-b")), 7)
+    XCTAssertEqual(store.dailyTotal(for: context.todayKey, tool: UsageAgent("agent-d")), 7)
+  }
+
   func testRefreshImportsEveryDiscoveredAgent() throws {
     let first = UsageAgent("future-agent")
     let second = UsageAgent("other-agent")
@@ -19,7 +46,7 @@ final class UsageRefreshServiceTests: XCTestCase {
     let result = try service.refresh(context: context)
 
     XCTAssertEqual(result.discoveredAgents, [first, second].sorted())
-    XCTAssertEqual(fetcher.requestedAgents, [first, second])
+    XCTAssertEqual(fetcher.requestedAgents.sorted(), [first, second])
     XCTAssertEqual(store.dailyTotal(for: "2026-07-17", tool: first), 2)
     XCTAssertEqual(store.dailyTotal(for: "2026-07-17", tool: second), 3)
     XCTAssertEqual(result.importErrors, [])
@@ -139,7 +166,7 @@ final class UsageRefreshServiceTests: XCTestCase {
 
     let result = try service.refresh(context: context)
 
-    XCTAssertEqual(fetcher.requestedAgents, [failed, successful])
+    XCTAssertEqual(fetcher.requestedAgents.sorted(), [failed, successful])
     XCTAssertEqual(store.dailyTotal(for: "2026-07-17", tool: successful), 3)
     XCTAssertEqual(result.importErrors.count, 1)
     XCTAssertTrue(result.importErrors[0].hasPrefix("Failed Agent:"))
@@ -301,6 +328,7 @@ private enum StubError: LocalizedError {
 }
 
 private final class StubUsageFetcher: UsageFetching, @unchecked Sendable {
+  private let lock = NSLock()
   private let discoveredAgents: [UsageAgent]
   private let totalsByAgent: [UsageAgent: [DailyTotal]]
   private let failingAgents: Set<UsageAgent>
@@ -342,9 +370,53 @@ private final class StubUsageFetcher: UsageFetching, @unchecked Sendable {
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]
   {
+    lock.lock()
+    defer { lock.unlock() }
     requestedTimeZones.append(context.timeZone.identifier)
     requestedAgents.append(tool)
     if failingAgents.contains(tool) { throw StubError.importFailed }
     return totalsByAgent[tool] ?? []
+  }
+}
+
+private final class BlockingUsageFetcher: UsageFetching, @unchecked Sendable {
+  let release = DispatchSemaphore(value: 0)
+  private let lock = NSLock()
+  private let firstPairStarted: XCTestExpectation
+  private var active = 0
+  private(set) var maximumActive = 0
+  private var started = 0
+
+  init(firstPairStarted: XCTestExpectation) {
+    self.firstPairStarted = firstPairStarted
+  }
+
+  func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
+    ["agent-d", "agent-c", "agent-b", "agent-a"].map(UsageAgent.init)
+  }
+
+  func fetchMachineLabels() throws -> MachineLabels? { nil }
+
+  func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
+    -> [DailyTotal]
+  {
+    lock.lock()
+    active += 1
+    started += 1
+    maximumActive = max(maximumActive, active)
+    if started == 2 { firstPairStarted.fulfill() }
+    lock.unlock()
+    defer {
+      lock.lock()
+      active -= 1
+      lock.unlock()
+    }
+    guard release.wait(timeout: .now() + 10) == .success else {
+      throw StubError.importFailed
+    }
+    if tool == UsageAgent("agent-a") || tool == UsageAgent("agent-c") {
+      throw StubError.importFailed
+    }
+    return [DailyTotal(dateKey: context.todayKey, cost: 7)]
   }
 }

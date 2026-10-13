@@ -2,6 +2,7 @@ import Foundation
 
 protocol UsageFetching: Sendable {
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent]
+  // Called concurrently for different agents after discovery and machine labels finish.
   func fetchDailyTotals(
     for tool: UsageAgent,
     using context: UsageDateContext

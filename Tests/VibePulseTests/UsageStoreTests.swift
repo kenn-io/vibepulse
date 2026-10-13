@@ -4,6 +4,51 @@ import XCTest
 @testable import VibePulse
 
 final class UsageStoreTests: XCTestCase {
+  func testBatchReplacementKeepsLastAvailableBreakdownForEachLogicalDate() throws {
+    let store = try UsageStore(path: ":memory:")
+    let context = UsageDateContext(
+      now: ISO8601DateFormatter().date(from: "2026-08-22T12:00:00Z")!,
+      timeZone: TimeZone(identifier: "UTC")!)
+    let original = DailyTotal(
+      dateKey: "2026-08-22", cost: 1,
+      modelBreakdowns: [DailyModelBreakdown(modelName: "old-model", cost: 1)],
+      machineBreakdowns: [DailyMachineBreakdown(machineName: "old-machine", cost: 1)])
+    try store.upsertDailyTotals(tool: .claude, totals: [original], dateContext: context)
+    try store.upsertDailyTotals(tool: .codex, totals: [original], dateContext: context)
+
+    try store.replaceDailyTotals(
+      tool: .claude,
+      totals: [
+        DailyTotal(
+          dateKey: "August 22, 2026", cost: 2,
+          modelBreakdowns: [DailyModelBreakdown(modelName: "new-model", cost: 2)],
+          machineBreakdowns: [DailyMachineBreakdown(machineName: "new-machine", cost: 2)]),
+        DailyTotal(dateKey: "2026-08-22", cost: 3, modelBreakdowns: []),
+        DailyTotal(dateKey: "2026-08-22", cost: 4),
+        DailyTotal(
+          dateKey: "2026-08-21", cost: 5,
+          modelBreakdowns: [DailyModelBreakdown(modelName: "other-model", cost: 5)],
+          machineBreakdowns: []),
+      ], dateContext: context)
+
+    XCTAssertEqual(store.dailyTotal(for: "2026-08-22", tool: .claude), 4)
+    let models = store.fetchModelDailyRollups(
+      since: "2026-08-21", tools: [.claude], timeZone: context.timeZone)
+    XCTAssertEqual(models.map(\.dateKey), ["2026-08-21"])
+    XCTAssertEqual(models.map(\.modelName), ["other-model"])
+    let machines = store.fetchMachineDailyRollups(
+      since: "2026-08-21", tools: [.claude], timeZone: context.timeZone)
+    XCTAssertEqual(machines.map(\.dateKey), ["2026-08-22"])
+    XCTAssertEqual(machines.map(\.machineName), ["new-machine"])
+    XCTAssertEqual(machines.map(\.totalCost), [2])
+    XCTAssertEqual(
+      store.fetchModelDailyRollups(since: "2026-08-21", tools: [.codex]).map(\.modelName),
+      ["old-model"])
+    XCTAssertEqual(
+      store.fetchMachineDailyRollups(since: "2026-08-21", tools: [.codex]).map(\.machineName),
+      ["old-machine"])
+  }
+
   func testCurrentDayInvalidationUsesRecordedAtInsteadOfDateKey() throws {
     let store = try UsageStore(path: ":memory:")
     let recordedAt = try XCTUnwrap(

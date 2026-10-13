@@ -1273,6 +1273,16 @@ final class UsageStore: @unchecked Sendable {
     if try ensureMachineSampleDeltaColumn() {
       _ = try backfillMachineSampleDeltas()
     }
+    // Timestamp queries cannot use the original date_key indexes.
+    try execute(
+      """
+      CREATE INDEX IF NOT EXISTS idx_samples_tool_recorded_at
+      ON samples (tool, recorded_at);
+      CREATE INDEX IF NOT EXISTS idx_model_samples_recorded_at
+      ON model_samples (recorded_at);
+      CREATE INDEX IF NOT EXISTS idx_machine_samples_recorded_at
+      ON machine_samples (recorded_at);
+      """)
   }
 
   private func execute(_ sql: String) throws {
@@ -1354,25 +1364,53 @@ final class UsageStore: @unchecked Sendable {
     totals: [DailyTotal],
     dateContext: UsageDateContext
   ) throws {
+    var modelsByDate: [String: [DailyModelBreakdown]] = [:]
+    var machinesByDate: [String: [DailyMachineBreakdown]] = [:]
     for total in totals {
-      let dateKey =
+      let normalizedDateKey =
         DateHelper.normalizedDateKey(from: total.dateKey, in: dateContext.timeZone)
-        ?? total.dateKey
+      let dateKey = normalizedDateKey ?? total.dateKey
       try upsertDailyTotal(tool: tool, dateKey: dateKey, totalCost: total.cost)
 
       if let modelBreakdowns = total.modelBreakdowns {
-        try upsertModelDailyTotals(
-          tool: tool,
-          dateKey: dateKey,
-          totals: modelBreakdowns,
-          timeZone: dateContext.timeZone)
+        if normalizedDateKey != nil {
+          modelsByDate[dateKey] = modelBreakdowns
+        } else {
+          // Unparseable stored keys are not removed by date-based cleanup.
+          modelsByDate[dateKey, default: []].append(contentsOf: modelBreakdowns)
+        }
       }
       if let machineBreakdowns = total.machineBreakdowns {
-        try upsertMachineDailyTotals(
-          tool: tool,
-          dateKey: dateKey,
-          totals: machineBreakdowns,
-          timeZone: dateContext.timeZone)
+        if normalizedDateKey != nil {
+          machinesByDate[dateKey] = machineBreakdowns
+        } else {
+          machinesByDate[dateKey, default: []].append(contentsOf: machineBreakdowns)
+        }
+      }
+    }
+
+    // The last available breakdown wins for each logical day. Nil preserves existing
+    // rows, while an empty array clears them. Scan historical keys once per table.
+    if !modelsByDate.isEmpty {
+      try deleteRollupsInCurrentQueue(
+        table: "model_daily_rollups", tool: tool, timeZone: dateContext.timeZone,
+        shouldDelete: { modelsByDate[$0] != nil })
+      for (dateKey, models) in modelsByDate {
+        for model in models {
+          try upsertModelDailyTotal(
+            tool: tool, dateKey: dateKey, modelName: model.modelName, totalCost: model.cost)
+        }
+      }
+    }
+    if !machinesByDate.isEmpty {
+      try deleteRollupsInCurrentQueue(
+        table: "machine_daily_rollups", tool: tool, timeZone: dateContext.timeZone,
+        shouldDelete: { machinesByDate[$0] != nil })
+      for (dateKey, machines) in machinesByDate {
+        for machine in machines {
+          try upsertMachineDailyTotal(
+            tool: tool, dateKey: dateKey, machineName: machine.machineName, totalCost: machine.cost)
+        }
       }
     }
   }
@@ -1504,28 +1542,6 @@ final class UsageStore: @unchecked Sendable {
     }
   }
 
-  private func upsertModelDailyTotals(
-    tool: UsageAgent,
-    dateKey: String,
-    totals: [DailyModelBreakdown],
-    timeZone: TimeZone
-  ) throws {
-    let normalizedDateKey =
-      DateHelper.normalizedDateKey(from: dateKey, in: timeZone) ?? dateKey
-    try deleteRollupsInCurrentQueue(
-      table: "model_daily_rollups",
-      tool: tool,
-      timeZone: timeZone,
-      shouldDelete: { $0 == normalizedDateKey })
-    for total in totals {
-      try upsertModelDailyTotal(
-        tool: tool,
-        dateKey: normalizedDateKey,
-        modelName: total.modelName,
-        totalCost: total.cost)
-    }
-  }
-
   private func upsertMachineDailyTotal(
     tool: UsageAgent,
     dateKey: String,
@@ -1549,28 +1565,6 @@ final class UsageStore: @unchecked Sendable {
       if sqlite3_step(statement) != SQLITE_DONE {
         throw StoreError.executeFailed(errorMessage)
       }
-    }
-  }
-
-  private func upsertMachineDailyTotals(
-    tool: UsageAgent,
-    dateKey: String,
-    totals: [DailyMachineBreakdown],
-    timeZone: TimeZone
-  ) throws {
-    let normalizedDateKey =
-      DateHelper.normalizedDateKey(from: dateKey, in: timeZone) ?? dateKey
-    try deleteRollupsInCurrentQueue(
-      table: "machine_daily_rollups",
-      tool: tool,
-      timeZone: timeZone,
-      shouldDelete: { $0 == normalizedDateKey })
-    for total in totals {
-      try upsertMachineDailyTotal(
-        tool: tool,
-        dateKey: normalizedDateKey,
-        machineName: total.machineName,
-        totalCost: total.cost)
     }
   }
 

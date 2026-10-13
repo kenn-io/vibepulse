@@ -71,7 +71,8 @@ Each refresh runs in two stages, orchestrated by
    preference, with `agentsview usage daily --format json --breakdown
    --agent <id> --since 30d --timezone <tz> --no-sync`. `--no-sync` avoids
    repeating agentsview's sync per agent, since discovery already
-   synced once. Each agent's import is independent — one agent's failure is
+   synced once. Reports run with at most two concurrent fetches, then import
+   in sorted agent order. Each agent's import is independent — one agent's failure is
    recorded as an error and does not stop the remaining agents from
    importing. If an older agentsview build rejects `--breakdown` or
    `--timezone`, `UsageFetcher` retries without the unsupported flag (or

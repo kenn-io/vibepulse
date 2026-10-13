@@ -27,11 +27,17 @@ final class UsageRefreshService: @unchecked Sendable {
     let agents = try fetcher.discoverAgents(using: context).sorted()
     // Labels are display-only, so a failed request must not block usage.
     let machineLabels = try? fetcher.fetchMachineLabels()
+    let reports = agents.map { DailyTotalsFetch(fetcher: fetcher, agent: $0, context: context) }
+    let queue = OperationQueue()
+    queue.maxConcurrentOperationCount = 2
+    queue.addOperations(reports, waitUntilFinished: true)
     var errors: [String] = []
 
-    for agent in agents {
+    // Fetches can finish in any order; imports and errors retain the agent order.
+    for report in reports {
+      let agent = report.agent
       do {
-        let totals = try fetcher.fetchDailyTotals(for: agent, using: context)
+        let totals = try report.result!.get()
         try store.replaceDailyTotals(
           tool: agent,
           totals: totals,
@@ -71,5 +77,29 @@ final class UsageRefreshService: @unchecked Sendable {
       discoveredAgents: agents,
       importErrors: errors,
       machineLabels: machineLabels)
+  }
+}
+
+private final class DailyTotalsFetch: Operation, @unchecked Sendable {
+  let agent: UsageAgent
+  private let fetcher: UsageFetching
+  private let context: UsageDateContext
+  private let lock = NSLock()
+  private var fetchedResult: Result<[DailyTotal], Error>?
+
+  // Read only after the queue has finished all operations. This queue is never cancelled.
+  var result: Result<[DailyTotal], Error>? {
+    lock.withLock { fetchedResult }
+  }
+
+  init(fetcher: UsageFetching, agent: UsageAgent, context: UsageDateContext) {
+    self.fetcher = fetcher
+    self.agent = agent
+    self.context = context
+  }
+
+  override func main() {
+    let result = Result { try fetcher.fetchDailyTotals(for: agent, using: context) }
+    lock.withLock { fetchedResult = result }
   }
 }
