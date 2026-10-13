@@ -86,4 +86,21 @@ final class DateHelperTests: XCTestCase {
     XCTAssertNil(DateHelper.normalizedDateKey(from: "2026-02-29"))
     XCTAssertNil(DateHelper.normalizedDateKey(from: "2026-13-01"))
   }
+
+  func testRepeatedDateConversionsKeepTimezonesAndFormatsIndependent() throws {
+    let losAngeles = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+    let tokyo = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+    let instant = try XCTUnwrap(
+      ISO8601DateFormatter().date(from: "2026-08-22T01:30:00Z"))
+
+    for _ in 0..<3 {
+      XCTAssertEqual(DateHelper.dateKey(for: instant, in: losAngeles), "2026-08-21")
+      XCTAssertEqual(DateHelper.dateKey(for: instant, in: tokyo), "2026-08-22")
+      XCTAssertEqual(
+        DateHelper.normalizedDateKey(from: "July 2, 2026", in: losAngeles), "2026-07-02")
+      XCTAssertEqual(
+        DateHelper.normalizedDateKey(from: "2026/07/15", in: tokyo), "2026-07-15")
+      XCTAssertNil(DateHelper.normalizedDateKey(from: "2026-02-30", in: losAngeles))
+    }
+  }
 }

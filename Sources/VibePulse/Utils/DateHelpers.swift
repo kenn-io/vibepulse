@@ -36,12 +36,14 @@ struct UsageDateContext: Sendable {
 }
 
 enum DateHelper {
-  private static let dateFormatter: DateFormatter = {
-    makeDateFormatter(format: "yyyy-MM-dd", timeZone: .autoupdatingCurrent)
+  private static let dateFormatters: NSCache<NSString, DateFormatter> = {
+    let cache = NSCache<NSString, DateFormatter>()
+    cache.countLimit = 32
+    return cache
   }()
 
   static func dateKey(for date: Date) -> String {
-    dateFormatter.string(from: date)
+    dateKey(for: date, in: .autoupdatingCurrent)
   }
 
   static func dateKey(for date: Date, in timeZone: TimeZone) -> String {
@@ -49,7 +51,7 @@ enum DateHelper {
   }
 
   static func date(fromKey key: String) -> Date? {
-    dateFormatter.date(from: key)
+    date(fromKey: key, in: .autoupdatingCurrent)
   }
 
   static func date(fromKey key: String, in timeZone: TimeZone) -> Date? {
@@ -101,12 +103,20 @@ enum DateHelper {
     format: String,
     timeZone: TimeZone
   ) -> DateFormatter {
+    let identifier = timeZone.identifier
+    let key = "\(identifier)|\(format)" as NSString
+    if let formatter = dateFormatters.object(forKey: key) {
+      return formatter
+    }
+
     let formatter = DateFormatter()
     formatter.calendar = Calendar(identifier: .gregorian)
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = timeZone
+    // Cached formatters must keep their timezone when the system timezone changes.
+    formatter.timeZone = TimeZone(identifier: identifier) ?? timeZone
     formatter.dateFormat = format
     formatter.isLenient = false
+    dateFormatters.setObject(formatter, forKey: key)
     return formatter
   }
 }

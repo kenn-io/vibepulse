@@ -1385,9 +1385,9 @@ final class UsageStore: @unchecked Sendable {
   ) throws {
     let selectSQL: String
     if tool == nil {
-      selectSQL = "SELECT date_key FROM \(table);"
+      selectSQL = "SELECT DISTINCT date_key FROM \(table);"
     } else {
-      selectSQL = "SELECT date_key FROM \(table) WHERE tool = ?;"
+      selectSQL = "SELECT DISTINCT date_key FROM \(table) WHERE tool = ?;"
     }
 
     var rawDateKeys = Set<String>()
