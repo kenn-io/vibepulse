@@ -187,11 +187,14 @@ final class UsageStore: @unchecked Sendable {
     queue.sync {
       let sql = """
         SELECT date_key, tool, total_cost
-        FROM daily_rollups;
+        FROM daily_rollups
+        WHERE date_key >= ? \(endDateKey == nil ? "" : "AND date_key <= ?");
         """
       var results: [DailyRollup] = []
       do {
         try withStatement(sql) { statement in
+          bindText(statement, index: 1, value: dateKey)
+          if let endDateKey { bindText(statement, index: 2, value: endDateKey) }
           while sqlite3_step(statement) == SQLITE_ROW {
             guard let dateKeyCString = sqlite3_column_text(statement, 0),
               let toolCString = sqlite3_column_text(statement, 1)
@@ -230,11 +233,14 @@ final class UsageStore: @unchecked Sendable {
       let toolValues = Set(tools.map(\.rawValue))
       let sql = """
         SELECT date_key, tool, model_name, total_cost
-        FROM model_daily_rollups;
+        FROM model_daily_rollups
+        WHERE date_key >= ? \(endDateKey == nil ? "" : "AND date_key <= ?");
         """
       var results: [ModelDailyRollup] = []
       do {
         try withStatement(sql) { statement in
+          bindText(statement, index: 1, value: dateKey)
+          if let endDateKey { bindText(statement, index: 2, value: endDateKey) }
           while sqlite3_step(statement) == SQLITE_ROW {
             guard let dateKeyCString = sqlite3_column_text(statement, 0),
               let toolCString = sqlite3_column_text(statement, 1),
@@ -288,11 +294,14 @@ final class UsageStore: @unchecked Sendable {
       let allowedTools = Set(tools)
       let sql = """
         SELECT date_key, tool, machine_name, total_cost
-        FROM machine_daily_rollups;
+        FROM machine_daily_rollups
+        WHERE date_key >= ? \(endDateKey == nil ? "" : "AND date_key <= ?");
         """
       var results: [MachineDailyRollup] = []
       do {
         try withStatement(sql) { statement in
+          bindText(statement, index: 1, value: dateKey)
+          if let endDateKey { bindText(statement, index: 2, value: endDateKey) }
           while sqlite3_step(statement) == SQLITE_ROW {
             guard
               let dateCString = sqlite3_column_text(statement, 0),
@@ -645,74 +654,6 @@ final class UsageStore: @unchecked Sendable {
         return []
       }
       return results
-    }
-  }
-
-  func backfillSampleDeltas() throws -> Int {
-    try queue.sync {
-      do {
-        try execute("BEGIN IMMEDIATE TRANSACTION;")
-
-        let selectSQL = """
-          SELECT id, tool, date_key, total_cost, delta_cost
-          FROM samples
-          ORDER BY tool, date_key, recorded_at ASC;
-          """
-
-        let updateSQL = "UPDATE samples SET delta_cost = ? WHERE id = ?;"
-
-        var updatedCount = 0
-        var previousTool: String?
-        var previousDateKey: String?
-        var previousTotal: Double = 0
-
-        var updateStatement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStatement, nil) == SQLITE_OK else {
-          throw StoreError.prepareFailed(errorMessage)
-        }
-        defer { sqlite3_finalize(updateStatement) }
-
-        try withStatement(selectSQL) { statement in
-          while sqlite3_step(statement) == SQLITE_ROW {
-            let sampleId = sqlite3_column_int(statement, 0)
-            guard let toolCString = sqlite3_column_text(statement, 1),
-              let dateKeyCString = sqlite3_column_text(statement, 2)
-            else {
-              continue
-            }
-            let toolRaw = String(cString: toolCString)
-            let dateKey = String(cString: dateKeyCString)
-            let totalCost = sqlite3_column_double(statement, 3)
-            let existingDelta = sqlite3_column_double(statement, 4)
-
-            if toolRaw != previousTool || dateKey != previousDateKey {
-              previousTool = toolRaw
-              previousDateKey = dateKey
-              previousTotal = 0
-            }
-
-            let newDelta = max(0, totalCost - previousTotal)
-            if abs(newDelta - existingDelta) > 0.0001 {
-              sqlite3_reset(updateStatement)
-              sqlite3_clear_bindings(updateStatement)
-              sqlite3_bind_double(updateStatement, 1, newDelta)
-              sqlite3_bind_int(updateStatement, 2, sampleId)
-              if sqlite3_step(updateStatement) != SQLITE_DONE {
-                throw StoreError.executeFailed(errorMessage)
-              }
-              updatedCount += 1
-            }
-
-            previousTotal = totalCost
-          }
-        }
-
-        try execute("COMMIT;")
-        return updatedCount
-      } catch {
-        try? execute("ROLLBACK;")
-        throw error
-      }
     }
   }
 
@@ -1283,6 +1224,47 @@ final class UsageStore: @unchecked Sendable {
       CREATE INDEX IF NOT EXISTS idx_machine_samples_recorded_at
       ON machine_samples (recorded_at);
       """)
+    try migrateRollupDateKeys()
+  }
+
+  private func migrateRollupDateKeys() throws {
+    let version = try withStatement("PRAGMA user_version;") { statement in
+      guard sqlite3_step(statement) == SQLITE_ROW else {
+        throw StoreError.executeFailed(errorMessage)
+      }
+      return sqlite3_column_int(statement, 0)
+    }
+    guard version < 1 else { return }
+
+    // Indexed date bounds require canonical keys, including for agents that
+    // have only machine history. Existing migrations predate user_version.
+    let agents = try withStatement(
+      """
+      SELECT tool FROM daily_rollups
+      UNION SELECT tool FROM model_daily_rollups
+      UNION SELECT tool FROM machine_daily_rollups;
+      """
+    ) { statement in
+      var agents: [UsageAgent] = []
+      var result = sqlite3_step(statement)
+      while result == SQLITE_ROW {
+        if let toolCString = sqlite3_column_text(statement, 0) {
+          let rawValue = String(cString: toolCString)
+          if !rawValue.isEmpty { agents.append(UsageAgent(rawValue)) }
+        }
+        result = sqlite3_step(statement)
+      }
+      guard result == SQLITE_DONE else { throw StoreError.executeFailed(errorMessage) }
+      return agents
+    }
+    for tool in agents {
+      _ = try normalizeDailyRollupDates(for: tool)
+      _ = try normalizeModelDailyRollupDates(for: tool)
+      _ = try normalizeMachineDailyRollupDates(for: tool)
+    }
+    // Each normalization commits independently and is safe to retry if an
+    // upgrade is interrupted. Mark complete only after every table succeeds.
+    try execute("PRAGMA user_version = 1;")
   }
 
   private func execute(_ sql: String) throws {

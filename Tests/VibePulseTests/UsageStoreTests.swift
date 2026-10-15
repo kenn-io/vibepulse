@@ -4,6 +4,83 @@ import XCTest
 @testable import VibePulse
 
 final class UsageStoreTests: XCTestCase {
+  func testMigrationNormalizesLegacyRollupsBeforeBoundedReads() throws {
+    let path = temporaryStorePath()
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    var db: OpaquePointer?
+    XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+    defer { sqlite3_close(db) }
+    // The rollup schema shipped before date normalization became a migration.
+    let schema = """
+      CREATE TABLE daily_rollups (
+        date_key TEXT NOT NULL, tool TEXT NOT NULL, total_cost REAL NOT NULL,
+        updated_at REAL NOT NULL, PRIMARY KEY (date_key, tool));
+      CREATE TABLE model_daily_rollups (
+        date_key TEXT NOT NULL, tool TEXT NOT NULL, model_name TEXT NOT NULL,
+        total_cost REAL NOT NULL, updated_at REAL NOT NULL,
+        PRIMARY KEY (date_key, tool, model_name));
+      CREATE TABLE machine_daily_rollups (
+        date_key TEXT NOT NULL, tool TEXT NOT NULL, machine_name TEXT NOT NULL,
+        total_cost REAL NOT NULL, updated_at REAL NOT NULL,
+        PRIMARY KEY (date_key, tool, machine_name));
+      INSERT INTO daily_rollups VALUES ('July 2, 2026', '', 1, 0);
+      """
+    XCTAssertEqual(sqlite3_exec(db, schema, nil, nil, nil), SQLITE_OK)
+    let machineOnlyAgent = UsageAgent("machine-only-agent")
+    for (key, cost, modelCost) in [("July 2, 2026", 9.0, 4.0), ("2026-07-02", 4.0, 9.0)] {
+      try insertRawDailyRollup(path: path, dateKey: key, tool: .claude, totalCost: cost)
+      try insertRawModelDailyRollup(
+        path: path, dateKey: key, tool: .codex, modelName: "model", totalCost: modelCost)
+      try insertRawMachineDailyRollup(
+        path: path, dateKey: key, tool: machineOnlyAgent, machineName: "machine", totalCost: cost)
+    }
+    for key in ["2026-06-30", "2026-07-03", "2026-07-99", "invalid"] {
+      try insertRawDailyRollup(path: path, dateKey: key, tool: .claude, totalCost: 100)
+      try insertRawModelDailyRollup(
+        path: path, dateKey: key, tool: .codex, modelName: "model", totalCost: 100)
+      try insertRawMachineDailyRollup(
+        path: path, dateKey: key, tool: machineOnlyAgent, machineName: "machine", totalCost: 100)
+    }
+
+    let interruptUpgrade = """
+      CREATE TRIGGER interrupt_upgrade BEFORE UPDATE ON machine_daily_rollups
+      BEGIN SELECT RAISE(ABORT, 'interrupted upgrade'); END;
+      """
+    XCTAssertEqual(sqlite3_exec(db, interruptUpgrade, nil, nil, nil), SQLITE_OK)
+    XCTAssertThrowsError(try UsageStore(path: path)) { error in
+      guard case UsageStore.StoreError.executeFailed(let message) = error else {
+        return XCTFail("Unexpected error: \(error)")
+      }
+      XCTAssertEqual(message, "interrupted upgrade")
+    }
+    XCTAssertEqual(sqlite3_exec(db, "DROP TRIGGER interrupt_upgrade;", nil, nil, nil), SQLITE_OK)
+
+    // Retry a partial upgrade, then reopen the completed database.
+    for _ in 0..<2 {
+      let store = try UsageStore(path: path)
+      XCTAssertEqual(store.dailyTotal(for: "2026-07-02", tool: .claude), 9)
+      let daily = store.fetchDailyRollups(since: "2026-07-01", through: "2026-07-02")
+      XCTAssertEqual(daily.map(\.dateKey), ["2026-07-02"])
+      XCTAssertEqual(daily.map(\.totalCost), [9])
+      let models = store.fetchModelDailyRollups(
+        since: "2026-07-01", through: "2026-07-02", tools: [.codex])
+      XCTAssertEqual(models.map(\.dateKey), ["2026-07-02"])
+      XCTAssertEqual(models.map(\.totalCost), [9])
+      let machines = store.fetchMachineDailyRollups(
+        since: "2026-07-01", through: "2026-07-02", tools: [machineOnlyAgent])
+      XCTAssertEqual(machines.map(\.dateKey), ["2026-07-02"])
+      XCTAssertEqual(machines.map(\.totalCost), [9])
+      XCTAssertEqual(
+        store.fetchDailyRollups(since: "2026-07-03").map(\.dateKey), ["2026-07-03"])
+      XCTAssertEqual(
+        store.fetchModelDailyRollups(since: "2026-07-03", tools: [.codex]).map(\.dateKey),
+        ["2026-07-03"])
+      XCTAssertEqual(
+        store.fetchMachineDailyRollups(since: "2026-07-03", tools: [machineOnlyAgent])
+          .map(\.dateKey), ["2026-07-03"])
+    }
+  }
+
   func testBatchReplacementKeepsLastAvailableBreakdownForEachLogicalDate() throws {
     let store = try UsageStore(path: ":memory:")
     let context = UsageDateContext(
@@ -144,7 +221,6 @@ final class UsageStoreTests: XCTestCase {
       dateContext: oldContext)
 
     try store.deleteCurrentDaySamples(using: newContext)
-    XCTAssertEqual(try store.backfillSampleDeltas(), 0)
     XCTAssertEqual(try store.backfillModelSampleDeltas(), 0)
     XCTAssertEqual(try store.backfillMachineSampleDeltas(), 0)
 
@@ -341,7 +417,6 @@ final class UsageStoreTests: XCTestCase {
     let context = UsageDateContext(
       now: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-22T12:00:00Z")),
       timeZone: try XCTUnwrap(TimeZone(identifier: "UTC")))
-    let historicalDateKey = "2026-07-02"
     let staleDateKey = "17 Aug 2026"
 
     try insertRawDailyRollup(
@@ -363,50 +438,23 @@ final class UsageStoreTests: XCTestCase {
 
     try store.deleteRefreshWindowRollups(using: context)
 
-    XCTAssertEqual(
-      store.fetchDailyRollups(
-        since: historicalDateKey, through: historicalDateKey, timeZone: context.timeZone
-      )
-      .map(\.totalCost),
-      [1])
-    XCTAssertTrue(
-      store.fetchDailyRollups(
-        since: context.usageWindowStartKey,
-        through: context.todayKey,
-        timeZone: context.timeZone
-      ).isEmpty)
-    XCTAssertEqual(
-      store.fetchModelDailyRollups(
-        since: historicalDateKey,
-        through: historicalDateKey,
-        tools: [.claude],
-        timeZone: context.timeZone
-      )
-      .map(\.totalCost),
-      [1])
-    XCTAssertTrue(
-      store.fetchModelDailyRollups(
-        since: context.usageWindowStartKey,
-        through: context.todayKey,
-        tools: [.claude],
-        timeZone: context.timeZone
-      ).isEmpty)
-    XCTAssertEqual(
-      store.fetchMachineDailyRollups(
-        since: historicalDateKey,
-        through: historicalDateKey,
-        tools: [.claude],
-        timeZone: context.timeZone
-      )
-      .map(\.totalCost),
-      [1])
-    XCTAssertTrue(
-      store.fetchMachineDailyRollups(
-        since: context.usageWindowStartKey,
-        through: context.todayKey,
-        tools: [.claude],
-        timeZone: context.timeZone
-      ).isEmpty)
+    // These legacy keys were inserted after opening the store. Inspect the
+    // persisted rows so bounded chart reads cannot hide a missed deletion.
+    var db: OpaquePointer?
+    XCTAssertEqual(sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+    defer { sqlite3_close(db) }
+    for table in ["daily_rollups", "model_daily_rollups", "machine_daily_rollups"] {
+      var statement: OpaquePointer?
+      XCTAssertEqual(
+        sqlite3_prepare_v2(db, "SELECT date_key, total_cost FROM \(table);", -1, &statement, nil),
+        SQLITE_OK)
+      defer { sqlite3_finalize(statement) }
+      XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW, table)
+      let key = try XCTUnwrap(sqlite3_column_text(statement, 0))
+      XCTAssertEqual(String(cString: key), "July 2, 2026", table)
+      XCTAssertEqual(sqlite3_column_double(statement, 1), 1, table)
+      XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE, table)
+    }
   }
 
   func testReplaceDailyTotalsRemovesNoncanonicalBreakdownKeysForReturnedDates() throws {

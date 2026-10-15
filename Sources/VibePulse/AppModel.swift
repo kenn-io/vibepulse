@@ -421,16 +421,13 @@ final class AppModel: ObservableObject {
 
     DispatchQueue.global(qos: .background).async { [store] in
       do {
-        let deltaUpdated = try store.backfillSampleDeltas()
-        let modelDeltaUpdated = try store.backfillModelSampleDeltas()
-        let machineDeltaUpdated = try store.backfillMachineSampleDeltas()
         let dateUpdated = try store.storedAgents().reduce(0) { count, tool in
           count + (try store.normalizeDailyRollupDates(for: tool))
             + (try store.normalizeModelDailyRollupDates(for: tool))
             + (try store.normalizeMachineDailyRollupDates(for: tool))
         }
         let message =
-          "Maintenance complete. Updated \(deltaUpdated + modelDeltaUpdated + machineDeltaUpdated) snapshots, normalized \(dateUpdated) daily totals."
+          "Maintenance complete. Normalized \(dateUpdated) daily totals."
         let now = Date()
         DispatchQueue.main.async {
           self.maintenanceMessage = message
@@ -502,7 +499,8 @@ final class AppModel: ObservableObject {
     timer?.cancel()
     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
     let intervalSeconds = max(60, refreshInterval.seconds)
-    timer.schedule(deadline: .now() + .seconds(5), repeating: .seconds(intervalSeconds))
+    timer.schedule(
+      deadline: .now() + .seconds(intervalSeconds), repeating: .seconds(intervalSeconds))
     timer.setEventHandler { [weak self] in
       Task { @MainActor in
         self?.refreshNow()
