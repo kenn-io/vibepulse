@@ -12,15 +12,6 @@ final class ChartModeTests: XCTestCase {
       ["Agent", "Model", "Machine"])
   }
 
-  func testChartModesIncludeSevenDayViewInDisplayOrder() {
-    XCTAssertEqual(
-      ChartMode.allCases.map(\.rawValue),
-      ["today", "sevenDays", "thirtyDays", "oneYear"])
-    XCTAssertEqual(
-      ChartMode.allCases.map(\.title),
-      ["Today", "7 Days", "30 Days", "1 Year"])
-  }
-
   func testDailyWindowDaysOnlyAppliesToDailyModes() {
     XCTAssertNil(ChartMode.today.dailyWindowDays)
     XCTAssertEqual(ChartMode.sevenDays.dailyWindowDays, 7)

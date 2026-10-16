@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
   @Published var machineDailySeries: [UsageSeriesPoint] = []
   @Published var machineMonthlySeries: [UsageSeriesPoint] = []
   @Published var machineTotals: [ToolTotal] = []
+  @Published private(set) var chartDateContext = UsageDateContext()
   @Published var lastUpdated: Date?
   @Published var statusMessage: String?
   @Published var isRefreshing = false
@@ -198,6 +199,7 @@ final class AppModel: ObservableObject {
       (refreshHistory && chartMode == .oneYear)
       || needsYearRefresh(context: UsageDateContext(now: now))
     let context = UsageDateContext(now: now, includesYear: includeYear)
+    let retainedAgents = !includeYear && lastYearRefresh != nil ? discoveredAgents : []
     if includeYear { lastYearRefresh = nil }
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
@@ -209,6 +211,7 @@ final class AppModel: ObservableObject {
       do {
         let result = try refreshService.refresh(
           context: context,
+          retainedAgents: retainedAgents,
           invalidateCurrentDay: invalidateCurrentDay)
 
         DispatchQueue.main.async {
@@ -219,11 +222,7 @@ final class AppModel: ObservableObject {
             return
           }
 
-          // Recent discovery must not hide agents that only have older usage.
-          self.discoveredAgents =
-            !context.includesYear && self.lastYearRefresh != nil
-            ? Array(Set(self.discoveredAgents + result.discoveredAgents)).sorted()
-            : result.discoveredAgents
+          self.discoveredAgents = result.discoveredAgents
           self.agentPreferences.saveDiscoveredAgents(self.discoveredAgents)
           if let machineLabels = result.machineLabels {
             self.machineLabelSnapshot = machineLabels
@@ -372,6 +371,7 @@ final class AppModel: ObservableObject {
 
     let displayContext = UsageDateContext(
       now: context.now, timeZone: context.timeZone, includesYear: chartMode == .oneYear)
+    chartDateContext = displayContext
     let sinceKey = displayContext.usageWindowStartKey
     let rollups = store.fetchDailyRollups(
       since: sinceKey,

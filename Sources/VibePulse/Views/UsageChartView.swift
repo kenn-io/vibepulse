@@ -4,6 +4,7 @@ import SwiftUI
 
 struct UsageChartView: View {
   let mode: ChartMode
+  let dateContext: UsageDateContext
   let cumulativeSeries: [UsageSeriesPoint]
   let historySeries: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
@@ -13,12 +14,16 @@ struct UsageChartView: View {
   @State private var historyTooltipPosition: CGPoint?
 
   var body: some View {
-    switch mode {
-    case .today:
-      todayChart
-    case .sevenDays, .thirtyDays, .oneYear:
-      historyChart
+    Group {
+      switch mode {
+      case .today:
+        todayChart
+      case .sevenDays, .thirtyDays, .oneYear:
+        historyChart
+      }
     }
+    .environment(\.calendar, dateContext.calendar)
+    .environment(\.timeZone, dateContext.timeZone)
   }
 
   private var todayChart: some View {
@@ -71,14 +76,14 @@ struct UsageChartView: View {
           ForEach(historySeries) { point in
             if mode.usesGroupedDailyBars {
               BarMark(
-                x: .value("Date", point.date, unit: historyUnit),
+                x: .value("Date", point.date, unit: historyUnit, calendar: dateContext.calendar),
                 y: .value("Cost", point.cost)
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
               .position(by: .value("Series", point.series.chartIdentity))
             } else {
               BarMark(
-                x: .value("Date", point.date, unit: historyUnit),
+                x: .value("Date", point.date, unit: historyUnit, calendar: dateContext.calendar),
                 y: .value("Cost", point.cost)
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
@@ -86,9 +91,11 @@ struct UsageChartView: View {
           }
 
           if let historyHoverDate, !historyHoverPoints.isEmpty {
-            RuleMark(x: .value("Date", historyHoverDate, unit: historyUnit))
-              .foregroundStyle(.secondary.opacity(0.5))
-              .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
+            RuleMark(
+              x: .value("Date", historyHoverDate, unit: historyUnit, calendar: dateContext.calendar)
+            )
+            .foregroundStyle(.secondary.opacity(0.5))
+            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
           }
         }
         .chartLegend(.hidden)
@@ -105,7 +112,10 @@ struct UsageChartView: View {
         }
         .chartXScale(domain: historyDomain)
         .chartXAxis {
-          AxisMarks(values: .stride(by: historyUnit, count: mode == .oneYear ? 2 : 5)) { value in
+          AxisMarks(
+            values: .stride(
+              by: historyUnit, count: mode == .oneYear ? 2 : 5, calendar: dateContext.calendar)
+          ) { value in
             AxisGridLine()
             AxisValueLabel {
               if let date = value.as(Date.self) {
@@ -149,7 +159,7 @@ struct UsageChartView: View {
   private var historyUnit: Calendar.Component { mode == .oneYear ? .month : .day }
 
   private var historyDomain: ClosedRange<Date> {
-    let context = UsageDateContext()
+    let context = dateContext
     if mode == .oneYear { return context.yearStart...context.yearEnd }
     let start = context.calendar.date(
       byAdding: .day, value: -(mode.dailyWindowDays! - 1), to: context.startOfToday)!
@@ -158,10 +168,13 @@ struct UsageChartView: View {
 
   private var historyHoverPoints: [UsageSeriesPoint] {
     guard let historyHoverDate else { return [] }
-    let calendar = Calendar.autoupdatingCurrent
+    return historyPoints(at: historyHoverDate)
+  }
+
+  func historyPoints(at date: Date) -> [UsageSeriesPoint] {
     return
       historySeries
-      .filter { calendar.isDate($0.date, equalTo: historyHoverDate, toGranularity: historyUnit) }
+      .filter { dateContext.calendar.isDate($0.date, equalTo: date, toGranularity: historyUnit) }
       .sorted { $0.series.sortKey < $1.series.sortKey }
   }
 
@@ -186,12 +199,8 @@ struct UsageChartView: View {
       return
     }
 
-    let calendar = Calendar.autoupdatingCurrent
-    let day = calendar.dateInterval(of: historyUnit, for: date)?.start ?? date
-    if historySeries.contains(where: {
-      calendar.isDate($0.date, equalTo: day, toGranularity: historyUnit)
-    }) {
-      historyHoverDate = day
+    if let point = historyPoints(at: date).first {
+      historyHoverDate = point.date
       historyTooltipPosition = CGPoint(x: plotFrame.minX + 8, y: plotFrame.minY + 8)
     } else {
       historyHoverDate = nil

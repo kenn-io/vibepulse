@@ -24,6 +24,7 @@ struct MenuContentView: View {
 
       UsageChartView(
         mode: chartMode,
+        dateContext: model.chartDateContext,
         cumulativeSeries: visibleCumulativeSeries,
         historySeries: visibleDailySeries,
         palette: palette,

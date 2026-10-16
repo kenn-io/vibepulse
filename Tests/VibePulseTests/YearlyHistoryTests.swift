@@ -42,6 +42,29 @@ final class YearlyHistoryTests: XCTestCase {
   }
 
   @MainActor
+  func testMonthlyHoverUsesTheAggregationTimezoneAtMonthBoundaries() throws {
+    let formatter = ISO8601DateFormatter()
+    let now = try XCTUnwrap(formatter.date(from: "2026-03-22T12:00:00Z"))
+    for zone in ["America/Los_Angeles", "Pacific/Kiritimati"] {
+      let context = UsageDateContext(
+        now: now, timeZone: TimeZone(identifier: zone)!, includesYear: true)
+      let february = try XCTUnwrap(DateHelper.date(fromKey: "2026-02-28", in: context.timeZone))
+      let march = try XCTUnwrap(DateHelper.date(fromKey: "2026-03-01", in: context.timeZone))
+      let monthly = UsageSeriesAggregation.monthlySeries(
+        from: [
+          UsageSeriesPoint(tool: .codex, date: february, cost: 7),
+          UsageSeriesPoint(tool: .codex, date: march, cost: 11),
+        ], context: context)
+      let chart = UsageChartView(
+        mode: .oneYear, dateContext: context, cumulativeSeries: [], historySeries: monthly,
+        palette: UsageSeriesPalette(series: [.agent(.codex)]), machineLabels: [:])
+
+      XCTAssertEqual(chart.historyPoints(at: march.addingTimeInterval(-60)).map(\.cost), [7], zone)
+      XCTAssertEqual(chart.historyPoints(at: march.addingTimeInterval(60)).map(\.cost), [11], zone)
+    }
+  }
+
+  @MainActor
   func testSelectingYearImportsOlderAgentsAndReusesHistoryDuringRecentRefreshes() async throws {
     let (model, fetcher) = try makeModel()
     await finishRefresh(model)
@@ -71,6 +94,34 @@ final class YearlyHistoryTests: XCTestCase {
     model.refreshNow()
     await finishRefresh(model)
     XCTAssertEqual(fetcher.yearRequests, 4)
+  }
+
+  @MainActor
+  func testRecentRefreshClearsDisappearedUsageWhilePreservingOlderHistory() async throws {
+    let (model, fetcher) = try makeModel()
+    await finishRefresh(model)
+    model.chartMode = .oneYear
+    await finishRefresh(model)
+    XCTAssertEqual(model.toolTotals.reduce(0) { $0 + $1.totalCost }, 2)
+    XCTAssertFalse(model.cumulativeSeries.isEmpty)
+    XCTAssertFalse(model.modelCumulativeSeries.isEmpty)
+    XCTAssertFalse(model.machineCumulativeSeries.isEmpty)
+
+    fetcher.removeRecentUsage()
+    model.refreshNow(refreshHistory: false)
+    await finishRefresh(model)
+
+    XCTAssertNil(model.statusMessage)
+    XCTAssertEqual(model.toolTotals.reduce(0) { $0 + $1.totalCost }, 0)
+    XCTAssertTrue(model.modelTotals.isEmpty)
+    XCTAssertTrue(model.machineTotals.isEmpty)
+    XCTAssertTrue(model.cumulativeSeries.isEmpty)
+    XCTAssertTrue(model.modelCumulativeSeries.isEmpty)
+    XCTAssertTrue(model.machineCumulativeSeries.isEmpty)
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 13)
+    XCTAssertEqual(model.modelMonthlySeries.reduce(0) { $0 + $1.cost }, 13)
+    XCTAssertEqual(model.machineMonthlySeries.reduce(0) { $0 + $1.cost }, 13)
+    XCTAssertEqual(fetcher.yearRequests, 2)
   }
 
   @MainActor
@@ -187,6 +238,7 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
   private var yearRequestCount = 0
   private var failYearDiscovery = false
   private var failYearReport = false
+  private var hasRecentUsage = true
   var yearRequests: Int { lock.withLock { yearRequestCount } }
 
   func failNextYearDiscovery() {
@@ -197,13 +249,18 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
     lock.withLock { failYearReport = true }
   }
 
+  func removeRecentUsage() {
+    lock.withLock { hasRecentUsage = false }
+  }
+
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
     try lock.withLock {
       if context.includesYear && failYearDiscovery {
         failYearDiscovery = false
         throw UsageFetcher.FetchError.invalidOutput
       }
-      return context.includesYear ? [.codex, UsageAgent("older-agent")] : [.codex]
+      return context.includesYear
+        ? [.codex, UsageAgent("older-agent")] : (hasRecentUsage ? [.codex] : [])
     }
   }
 
@@ -223,9 +280,10 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
     }
     let older = context.calendar.date(byAdding: .month, value: -6, to: context.startOfToday)!
     let olderKey = DateHelper.dateKey(for: older, in: context.timeZone)
-    let values: [(String, Double)] =
+    var values: [(String, Double)] =
       tool == .codex
       ? [(olderKey, 10), (context.todayKey, 2)] : [(olderKey, 3)]
+    if !lock.withLock({ hasRecentUsage }) { values.removeAll { $0.0 == context.todayKey } }
     return values.filter { $0.0 >= context.usageWindowStartKey }.map { date, cost in
       DailyTotal(
         dateKey: date, cost: cost,

@@ -17,6 +17,7 @@ final class UsageRefreshService: @unchecked Sendable {
 
   func refresh(
     context: UsageDateContext,
+    retainedAgents: [UsageAgent] = [],
     invalidateCurrentDay: Bool = false
   ) throws -> UsageRefreshResult {
     if invalidateCurrentDay {
@@ -25,6 +26,12 @@ final class UsageRefreshService: @unchecked Sendable {
     }
 
     let agents = try fetcher.discoverAgents(using: context).sorted()
+    // Discovery includes only agents with positive usage in this window. Keep older
+    // history visible without retaining stale recent totals or fetching extra reports.
+    for agent in Set(retainedAgents).subtracting(agents) {
+      try store.replaceDailyTotals(tool: agent, totals: [], dateContext: context)
+      try store.deleteCurrentDaySamples(for: agent, using: context)
+    }
     // Labels are display-only, so a failed request must not block usage.
     let machineLabels = try? fetcher.fetchMachineLabels()
     let reports = agents.map { DailyTotalsFetch(fetcher: fetcher, agent: $0, context: context) }
@@ -74,7 +81,7 @@ final class UsageRefreshService: @unchecked Sendable {
     }
 
     return UsageRefreshResult(
-      discoveredAgents: agents,
+      discoveredAgents: Array(Set(agents + retainedAgents)).sorted(),
       importErrors: errors,
       machineLabels: machineLabels)
   }
