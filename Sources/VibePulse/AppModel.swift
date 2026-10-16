@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewPath, forKey: DefaultsKey.agentsviewPath
       )
+      sourceConfigurationGeneration += 1
       lastUpdated = nil
     }
   }
@@ -46,6 +47,7 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewServerURL, forKey: DefaultsKey.agentsviewServerURL
       )
+      sourceConfigurationGeneration += 1
       lastUpdated = nil
     }
   }
@@ -70,6 +72,7 @@ final class AppModel: ObservableObject {
   private var isUpdatingLoginItem = false
   private let store: UsageStore
   private let refreshService: UsageRefreshService
+  private var sourceConfigurationGeneration = 0
 
   init(
     defaults: UserDefaults = .standard,
@@ -168,8 +171,7 @@ final class AppModel: ObservableObject {
     isRefreshing = true
     statusMessage = nil
 
-    let sourcePath = agentsviewPath
-    let sourceURL = agentsviewServerURL
+    let sourceGeneration = sourceConfigurationGeneration
     let context = UsageDateContext(now: now)
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
@@ -200,7 +202,7 @@ final class AppModel: ObservableObject {
           }
           if result.importErrors.isEmpty {
             self.statusMessage = nil
-            if self.agentsviewPath == sourcePath, self.agentsviewServerURL == sourceURL {
+            if self.sourceConfigurationGeneration == sourceGeneration {
               self.lastUpdated = context.now
             }
           } else {

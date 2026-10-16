@@ -72,6 +72,32 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
+  func testSourceChangedAndRestoredDuringRefreshStillRequiresAnotherRequest() async throws {
+    for (setting, otherSource) in [
+      (\AppModel.agentsviewServerURL, "https://example.com"),
+      (\AppModel.agentsviewPath, "/example/agentsview"),
+    ] {
+      let (model, fetcher, store) = try makeModel()
+      let originalSource = model[keyPath: setting]
+
+      // The main actor cannot complete the initial refresh until these changes finish.
+      model[keyPath: setting] = otherSource
+      model[keyPath: setting] = originalSource
+      await finishRefresh(model)
+      XCTAssertNil(model.lastUpdated)
+
+      model.refreshIfNeeded()
+      await finishRefresh(model)
+      XCTAssertEqual(fetcher.requestCount, 2)
+      XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 2)
+
+      model.refreshIfNeeded()
+      await finishRefresh(model)
+      XCTAssertEqual(fetcher.requestCount, 2)
+    }
+  }
+
+  @MainActor
   func testMenuRefreshesWhenSourceChanges() async throws {
     let (model, fetcher, _) = try makeModel()
     await finishRefresh(model)
