@@ -159,10 +159,10 @@ final class AppModel: ObservableObject {
     {
       return
     }
-    refreshNow()
+    refreshNow(now: now)
   }
 
-  func refreshNow() {
+  func refreshNow(now: Date = Date()) {
     guard !isRefreshing else { return }
 
     isRefreshing = true
@@ -170,7 +170,7 @@ final class AppModel: ObservableObject {
 
     let sourcePath = agentsviewPath
     let sourceURL = agentsviewServerURL
-    let context = UsageDateContext()
+    let context = UsageDateContext(now: now)
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
     if invalidateCurrentDay {
@@ -182,7 +182,6 @@ final class AppModel: ObservableObject {
         let result = try refreshService.refresh(
           context: context,
           invalidateCurrentDay: invalidateCurrentDay)
-        let refreshTime = Date()
 
         DispatchQueue.main.async {
           guard UsageDateContext().timeZone.identifier == context.timeZone.identifier else {
@@ -202,7 +201,7 @@ final class AppModel: ObservableObject {
           if result.importErrors.isEmpty {
             self.statusMessage = nil
             if self.agentsviewPath == sourcePath, self.agentsviewServerURL == sourceURL {
-              self.lastUpdated = refreshTime
+              self.lastUpdated = context.now
             }
           } else {
             self.statusMessage = result.importErrors.joined(separator: " | ")

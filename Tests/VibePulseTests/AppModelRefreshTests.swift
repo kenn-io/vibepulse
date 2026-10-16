@@ -100,6 +100,29 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
+  func testMenuRefreshesWhenPreviousRefreshFinishesAfterMidnight() async throws {
+    let (model, fetcher, store) = try makeModel()
+    await finishRefresh(model)
+    model.refreshInterval = .oneDay
+    let today = UsageDateContext()
+
+    // Capture yesterday's context, then let the asynchronous refresh finish today.
+    model.refreshNow(now: today.startOfToday.addingTimeInterval(-1))
+    await finishRefresh(model)
+    XCTAssertEqual(fetcher.requestCount, 2)
+
+    model.refreshIfNeeded()
+    await finishRefresh(model)
+    XCTAssertEqual(fetcher.requestCount, 3)
+    XCTAssertEqual(store.dailyTotal(for: today.todayKey, tool: .codex), 3)
+    XCTAssertEqual(model.cumulativeSeries.last?.cost, 3)
+
+    model.refreshIfNeeded()
+    await finishRefresh(model)
+    XCTAssertEqual(fetcher.requestCount, 3)
+  }
+
+  @MainActor
   func testMenuRetriesAfterFailedManualRefresh() async throws {
     let (model, fetcher, store) = try makeModel()
     await finishRefresh(model)
