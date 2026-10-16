@@ -3,6 +3,48 @@ import XCTest
 @testable import VibePulse
 
 final class UsageRefreshServiceTests: XCTestCase {
+  func testYearDiscoveryClearsAbsentStoredAgentsOnlyWithinTheRefreshWindow() throws {
+    let context = UsageDateContext(
+      now: testContext().now, timeZone: TimeZone(identifier: "UTC")!, includesYear: true)
+    let agent = UsageAgent("inactive-agent")
+    let machineOnlyAgent = UsageAgent("machine-only-agent")
+    let store = try UsageStore(path: ":memory:")
+    try store.upsertDailyTotals(
+      tool: agent,
+      totals: [("2025-07-31", 9.0), ("2025-08-01", 4.0)].map { date, cost in
+        DailyTotal(
+          dateKey: date, cost: cost,
+          modelBreakdowns: [DailyModelBreakdown(modelName: "example-model", cost: cost)],
+          machineBreakdowns: [DailyMachineBreakdown(machineName: "example-machine", cost: cost)])
+      }, dateContext: context)
+    try store.insertMachineSample(
+      tool: machineOnlyAgent, machineName: "example-machine", totalCost: 6,
+      recordedAt: context.now, dateContext: context)
+    let fetcher = StubUsageFetcher()
+    let service = UsageRefreshService(fetcher: fetcher, store: store)
+
+    let result = try service.refresh(context: context)
+
+    XCTAssertTrue(result.discoveredAgents.isEmpty)
+    XCTAssertTrue(result.importErrors.isEmpty)
+    XCTAssertTrue(fetcher.requestedAgents.isEmpty)
+    XCTAssertEqual(
+      store.fetchDailyRollups(since: "2025-07-31", timeZone: context.timeZone).map(\.totalCost), [9]
+    )
+    XCTAssertEqual(
+      store.fetchModelDailyRollups(
+        since: "2025-07-31", tools: [agent], timeZone: context.timeZone
+      ).map(\.totalCost), [9])
+    XCTAssertEqual(
+      store.fetchMachineDailyRollups(
+        since: "2025-07-31", tools: [agent], timeZone: context.timeZone
+      ).map(\.totalCost), [9])
+    XCTAssertTrue(
+      store.fetchMachineSamples(
+        tools: [machineOnlyAgent], from: context.startOfToday, to: context.now
+      ).isEmpty)
+  }
+
   func testRefreshOverlapsAtMostTwoReportsAndImportsAfterFetchFailure() throws {
     let firstPairStarted = expectation(description: "two reports started")
     let refreshFinished = expectation(description: "refresh finished")

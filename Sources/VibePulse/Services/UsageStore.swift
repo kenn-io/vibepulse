@@ -160,7 +160,9 @@ final class UsageStore: @unchecked Sendable {
         SELECT tool FROM samples
         UNION SELECT tool FROM daily_rollups
         UNION SELECT tool FROM model_samples
-        UNION SELECT tool FROM model_daily_rollups;
+        UNION SELECT tool FROM model_daily_rollups
+        UNION SELECT tool FROM machine_samples
+        UNION SELECT tool FROM machine_daily_rollups;
         """
       var agents = Set<UsageAgent>()
       do {

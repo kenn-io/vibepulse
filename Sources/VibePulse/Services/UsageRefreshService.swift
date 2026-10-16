@@ -26,9 +26,9 @@ final class UsageRefreshService: @unchecked Sendable {
     }
 
     let agents = try fetcher.discoverAgents(using: context).sorted()
-    // Discovery includes only agents with positive usage in this window. Keep older
-    // history visible without retaining stale recent totals or fetching extra reports.
-    for agent in Set(retainedAgents).subtracting(agents) {
+    // Year discovery must also reconcile agents that have already left the active list.
+    let cachedAgents = context.includesYear ? store.storedAgents() : retainedAgents
+    for agent in Set(cachedAgents).subtracting(agents) {
       try store.replaceDailyTotals(tool: agent, totals: [], dateContext: context)
       try store.deleteCurrentDaySamples(for: agent, using: context)
     }

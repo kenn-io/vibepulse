@@ -125,6 +125,41 @@ final class YearlyHistoryTests: XCTestCase {
   }
 
   @MainActor
+  func testDeletedYearHistoryDoesNotReturnWhenAnAgentBecomesActiveAgain() async throws {
+    let (model, fetcher) = try makeModel()
+    await finishRefresh(model)
+    model.chartMode = .oneYear
+    await finishRefresh(model)
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 15)
+
+    fetcher.removeCodexUsage()
+    fetcher.failNextYearDiscovery()
+    model.refreshNow()
+    await finishRefresh(model)
+    XCTAssertNotNil(model.statusMessage)
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 15)
+
+    model.refreshNow()
+    await finishRefresh(model)
+    XCTAssertNil(model.statusMessage)
+    XCTAssertEqual(model.discoveredAgents, [UsageAgent("older-agent")])
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 3)
+
+    fetcher.recordRecentUsage(cost: 5)
+    model.refreshNow(refreshHistory: false)
+    await finishRefresh(model)
+
+    XCTAssertNil(model.statusMessage)
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 8)
+    XCTAssertEqual(model.modelMonthlySeries.reduce(0) { $0 + $1.cost }, 8)
+    XCTAssertEqual(model.machineMonthlySeries.reduce(0) { $0 + $1.cost }, 8)
+    XCTAssertEqual(model.cumulativeSeries.map(\.cost), [5])
+    XCTAssertEqual(model.modelCumulativeSeries.map(\.cost), [5])
+    XCTAssertEqual(model.machineCumulativeSeries.map(\.cost), [5])
+    XCTAssertEqual(fetcher.yearRequests, 3)
+  }
+
+  @MainActor
   func testSelectingYearDuringStartupQueuesHistoryAfterCurrentRefresh() async throws {
     let (model, fetcher) = try makeModel()
     let view = NSHostingView(
@@ -238,7 +273,8 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
   private var yearRequestCount = 0
   private var failYearDiscovery = false
   private var failYearReport = false
-  private var hasRecentUsage = true
+  private var recentCost: Double? = 2
+  private var hasOlderCodexUsage = true
   var yearRequests: Int { lock.withLock { yearRequestCount } }
 
   func failNextYearDiscovery() {
@@ -250,7 +286,18 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
   }
 
   func removeRecentUsage() {
-    lock.withLock { hasRecentUsage = false }
+    lock.withLock { recentCost = nil }
+  }
+
+  func removeCodexUsage() {
+    lock.withLock {
+      recentCost = nil
+      hasOlderCodexUsage = false
+    }
+  }
+
+  func recordRecentUsage(cost: Double) {
+    lock.withLock { recentCost = cost }
   }
 
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
@@ -259,8 +306,12 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
         failYearDiscovery = false
         throw UsageFetcher.FetchError.invalidOutput
       }
-      return context.includesYear
-        ? [.codex, UsageAgent("older-agent")] : (hasRecentUsage ? [.codex] : [])
+      var agents: [UsageAgent] = recentCost == nil ? [] : [.codex]
+      if context.includesYear {
+        if hasOlderCodexUsage && agents.isEmpty { agents.append(.codex) }
+        agents.append(UsageAgent("older-agent"))
+      }
+      return agents
     }
   }
 
@@ -280,10 +331,12 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
     }
     let older = context.calendar.date(byAdding: .month, value: -6, to: context.startOfToday)!
     let olderKey = DateHelper.dateKey(for: older, in: context.timeZone)
-    var values: [(String, Double)] =
-      tool == .codex
-      ? [(olderKey, 10), (context.todayKey, 2)] : [(olderKey, 3)]
-    if !lock.withLock({ hasRecentUsage }) { values.removeAll { $0.0 == context.todayKey } }
+    let values: [(String, Double)] = lock.withLock {
+      guard tool == .codex else { return [(olderKey, 3)] }
+      var values: [(String, Double)] = hasOlderCodexUsage ? [(olderKey, 10)] : []
+      if let recentCost { values.append((context.todayKey, recentCost)) }
+      return values
+    }
     return values.filter { $0.0 >= context.usageWindowStartKey }.map { date, cost in
       DailyTotal(
         dateKey: date, cost: cost,
