@@ -15,10 +15,10 @@ final class ChartModeTests: XCTestCase {
   func testChartModesIncludeSevenDayViewInDisplayOrder() {
     XCTAssertEqual(
       ChartMode.allCases.map(\.rawValue),
-      ["today", "sevenDays", "thirtyDays"])
+      ["today", "sevenDays", "thirtyDays", "oneYear"])
     XCTAssertEqual(
       ChartMode.allCases.map(\.title),
-      ["Today", "7 Days", "30 Days"])
+      ["Today", "7 Days", "30 Days", "1 Year"])
   }
 
   func testDailyWindowDaysOnlyAppliesToDailyModes() {

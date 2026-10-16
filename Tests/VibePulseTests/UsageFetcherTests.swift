@@ -30,19 +30,17 @@ final class UsageFetcherTests: XCTestCase {
     let discoveryURL = try UsageFetcher.makeServerURL(
       configuredURL: "http://127.0.0.1:18080",
       agent: nil,
-      now: now,
-      timeZone: timeZone)
+      context: UsageDateContext(now: now, timeZone: timeZone))
     let agentURL = try UsageFetcher.makeServerURL(
       configuredURL: "http://127.0.0.1:18080",
       agent: "claude",
-      now: now,
-      timeZone: timeZone)
+      context: UsageDateContext(now: now, timeZone: timeZone))
 
     for url in [discoveryURL, agentURL] {
       let components = URLComponents(
         url: url, resolvingAgainstBaseURL: false)
       let queryItems = try XCTUnwrap(components?.queryItems)
-      XCTAssertEqual(queryItems.first { $0.name == "from" }?.value, "2026-07-11")
+      XCTAssertEqual(queryItems.first { $0.name == "from" }?.value, "2026-07-12")
       XCTAssertEqual(queryItems.first { $0.name == "no_default_range" }?.value, "true")
       XCTAssertEqual(queryItems.first { $0.name == "timezone" }?.value, "America/New_York")
     }
@@ -53,6 +51,30 @@ final class UsageFetcherTests: XCTestCase {
       URLComponents(url: agentURL, resolvingAgainstBaseURL: false)?.queryItems?
         .first { $0.name == "agent" }?.value,
       "claude")
+  }
+
+  func testYearRequestsUseTheSameCalendarWindowForCLIAndServer() throws {
+    let context = UsageDateContext(
+      now: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-10T12:00:00Z")),
+      timeZone: TimeZone(identifier: "America/New_York")!, includesYear: true)
+    var commands: [[String]] = []
+    let fetcher = UsageFetcher(commandRunner: { command in
+      commands.append(command)
+      return Data(#"{"daily":[],"agents":[]}"#.utf8)
+    })
+    _ = try fetcher.discoverAgents(using: context)
+    _ = try fetcher.fetchDailyTotals(for: .codex, using: context)
+    XCTAssertEqual(commands.count, 2)
+    for command in commands {
+      let since = try XCTUnwrap(command.firstIndex(of: "--since"))
+      XCTAssertEqual(command[since + 1], "2025-09-01")
+    }
+
+    let url = try UsageFetcher.makeServerURL(
+      configuredURL: "https://example.com", agent: "codex", context: context)
+    let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+    XCTAssertEqual(query.first { $0.name == "from" }?.value, "2025-09-01")
+    XCTAssertEqual(query.first { $0.name == "timezone" }?.value, "America/New_York")
   }
 
   func testMachinesURLUsesConfiguredServerBase() throws {
@@ -136,7 +158,7 @@ final class UsageFetcherTests: XCTestCase {
       commands[1],
       [
         "agentsview", "usage", "daily", "--format", "json", "--agent", "claude", "--since",
-        "30d", "--timezone", "America/New_York", "--no-sync",
+        "2025-05-17", "--timezone", "America/New_York", "--no-sync",
       ])
   }
 

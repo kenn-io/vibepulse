@@ -5,21 +5,19 @@ import SwiftUI
 struct UsageChartView: View {
   let mode: ChartMode
   let cumulativeSeries: [UsageSeriesPoint]
-  let dailySeries: [UsageSeriesPoint]
+  let historySeries: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
   let machineLabels: [String: String]
 
-  @State private var dailyHoverDate: Date?
-  @State private var dailyTooltipPosition: CGPoint?
+  @State private var historyHoverDate: Date?
+  @State private var historyTooltipPosition: CGPoint?
 
   var body: some View {
     switch mode {
     case .today:
       todayChart
-    case .sevenDays:
-      dailyChart
-    case .thirtyDays:
-      dailyChart
+    case .sevenDays, .thirtyDays, .oneYear:
+      historyChart
     }
   }
 
@@ -64,31 +62,31 @@ struct UsageChartView: View {
     }
   }
 
-  private var dailyChart: some View {
+  private var historyChart: some View {
     Group {
-      if dailySeries.isEmpty {
-        EmptyStateView(message: "No daily totals yet.")
+      if historySeries.isEmpty {
+        EmptyStateView(message: "No usage in this period.")
       } else {
         Chart {
-          ForEach(dailySeries) { point in
+          ForEach(historySeries) { point in
             if mode.usesGroupedDailyBars {
               BarMark(
-                x: .value("Date", point.date, unit: .day),
+                x: .value("Date", point.date, unit: historyUnit),
                 y: .value("Cost", point.cost)
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
               .position(by: .value("Series", point.series.chartIdentity))
             } else {
               BarMark(
-                x: .value("Date", point.date, unit: .day),
+                x: .value("Date", point.date, unit: historyUnit),
                 y: .value("Cost", point.cost)
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
             }
           }
 
-          if let dailyHoverDate, !dailyHoverPoints.isEmpty {
-            RuleMark(x: .value("Date", dailyHoverDate, unit: .day))
+          if let historyHoverDate, !historyHoverPoints.isEmpty {
+            RuleMark(x: .value("Date", historyHoverDate, unit: historyUnit))
               .foregroundStyle(.secondary.opacity(0.5))
               .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
           }
@@ -105,12 +103,17 @@ struct UsageChartView: View {
             }
           }
         }
+        .chartXScale(domain: historyDomain)
         .chartXAxis {
-          AxisMarks(values: .stride(by: .day, count: 5)) { value in
+          AxisMarks(values: .stride(by: historyUnit, count: mode == .oneYear ? 2 : 5)) { value in
             AxisGridLine()
             AxisValueLabel {
               if let date = value.as(Date.self) {
-                Text(date, format: .dateTime.month().day())
+                if mode == .oneYear {
+                  Text(date, format: .dateTime.month(.abbreviated))
+                } else {
+                  Text(date, format: .dateTime.month().day())
+                }
               }
             }
           }
@@ -118,69 +121,86 @@ struct UsageChartView: View {
         .chartOverlay { proxy in
           GeometryReader { geo in
             HoverTrackingView { location in
-              updateDailyHover(location, proxy: proxy, geo: geo)
+              updateHistoryHover(location, proxy: proxy, geo: geo)
             }
           }
         }
         .overlay(alignment: .topLeading) {
-          if let dailyHoverDate, !dailyHoverPoints.isEmpty, let dailyTooltipPosition {
-            DailyTooltipView(
-              date: dailyHoverDate,
-              points: dailyHoverPoints,
+          if let historyHoverDate, !historyHoverPoints.isEmpty, let historyTooltipPosition {
+            HistoryTooltipView(
+              date: historyHoverDate,
+              isMonthly: mode == .oneYear,
+              points: historyHoverPoints,
               palette: palette,
               machineLabels: machineLabels
             )
-            .offset(x: dailyTooltipPosition.x, y: dailyTooltipPosition.y)
+            .offset(x: historyTooltipPosition.x, y: historyTooltipPosition.y)
           }
         }
         .frame(height: 160)
+        .onChange(of: mode) { _ in
+          historyHoverDate = nil
+          historyTooltipPosition = nil
+        }
       }
     }
   }
 
-  private var dailyHoverPoints: [UsageSeriesPoint] {
-    guard let dailyHoverDate else { return [] }
+  private var historyUnit: Calendar.Component { mode == .oneYear ? .month : .day }
+
+  private var historyDomain: ClosedRange<Date> {
+    let context = UsageDateContext()
+    if mode == .oneYear { return context.yearStart...context.yearEnd }
+    let start = context.calendar.date(
+      byAdding: .day, value: -(mode.dailyWindowDays! - 1), to: context.startOfToday)!
+    return start...context.startOfNextDay
+  }
+
+  private var historyHoverPoints: [UsageSeriesPoint] {
+    guard let historyHoverDate else { return [] }
     let calendar = Calendar.autoupdatingCurrent
     return
-      dailySeries
-      .filter { calendar.isDate($0.date, inSameDayAs: dailyHoverDate) }
+      historySeries
+      .filter { calendar.isDate($0.date, equalTo: historyHoverDate, toGranularity: historyUnit) }
       .sorted { $0.series.sortKey < $1.series.sortKey }
   }
 
-  private func updateDailyHover(_ location: CGPoint?, proxy: ChartProxy, geo: GeometryProxy) {
+  private func updateHistoryHover(_ location: CGPoint?, proxy: ChartProxy, geo: GeometryProxy) {
     guard let location else {
-      dailyHoverDate = nil
-      dailyTooltipPosition = nil
+      historyHoverDate = nil
+      historyTooltipPosition = nil
       return
     }
 
     let plotFrame = geo[proxy.plotAreaFrame]
     guard plotFrame.contains(location) else {
-      dailyHoverDate = nil
-      dailyTooltipPosition = nil
+      historyHoverDate = nil
+      historyTooltipPosition = nil
       return
     }
 
     let relativeX = location.x - plotFrame.origin.x
     guard let date: Date = proxy.value(atX: relativeX) else {
-      dailyHoverDate = nil
-      dailyTooltipPosition = nil
+      historyHoverDate = nil
+      historyTooltipPosition = nil
       return
     }
 
     let calendar = Calendar.autoupdatingCurrent
-    let day = calendar.startOfDay(for: date)
-    if dailySeries.contains(where: { calendar.isDate($0.date, inSameDayAs: day) }) {
-      dailyHoverDate = day
-      dailyTooltipPosition = CGPoint(x: plotFrame.minX + 8, y: plotFrame.minY + 8)
+    let day = calendar.dateInterval(of: historyUnit, for: date)?.start ?? date
+    if historySeries.contains(where: {
+      calendar.isDate($0.date, equalTo: day, toGranularity: historyUnit)
+    }) {
+      historyHoverDate = day
+      historyTooltipPosition = CGPoint(x: plotFrame.minX + 8, y: plotFrame.minY + 8)
     } else {
-      dailyHoverDate = nil
-      dailyTooltipPosition = nil
+      historyHoverDate = nil
+      historyTooltipPosition = nil
     }
   }
 
   private var chartSeries: [UsageSeriesKey] {
-    let series = (cumulativeSeries + dailySeries).map(\.series)
+    let series = (cumulativeSeries + historySeries).map(\.series)
     return Array(Set(series)).sorted { $0.sortKey < $1.sortKey }
   }
 
@@ -193,15 +213,16 @@ struct UsageChartView: View {
   }
 }
 
-private struct DailyTooltipView: View {
+private struct HistoryTooltipView: View {
   let date: Date
+  let isMonthly: Bool
   let points: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
   let machineLabels: [String: String]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text(date, format: .dateTime.month().day())
+      Text(date, format: isMonthly ? .dateTime.month().year() : .dateTime.month().day())
         .font(.caption)
         .foregroundColor(.secondary)
 

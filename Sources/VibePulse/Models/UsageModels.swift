@@ -4,6 +4,7 @@ enum ChartMode: String, CaseIterable, Identifiable {
   case today
   case sevenDays
   case thirtyDays
+  case oneYear
 
   var id: String { rawValue }
 
@@ -15,12 +16,14 @@ enum ChartMode: String, CaseIterable, Identifiable {
       return "7 Days"
     case .thirtyDays:
       return "30 Days"
+    case .oneYear:
+      return "1 Year"
     }
   }
 
   var dailyWindowDays: Int? {
     switch self {
-    case .today:
+    case .today, .oneYear:
       return nil
     case .sevenDays:
       return 7
@@ -31,7 +34,7 @@ enum ChartMode: String, CaseIterable, Identifiable {
 
   var usesGroupedDailyBars: Bool {
     switch self {
-    case .today, .thirtyDays:
+    case .today, .thirtyDays, .oneYear:
       return false
     case .sevenDays:
       return true

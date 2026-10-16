@@ -9,10 +9,12 @@ final class UsageAgentTests: XCTestCase {
 
     XCTAssertEqual(agent.rawValue, "future-agent_v2")
     XCTAssertEqual(
-      agent.dailyCommand(in: timeZone),
+      agent.dailyCommand(
+        using: UsageDateContext(
+          now: DateHelper.date(fromKey: "2026-08-10", in: timeZone)!, timeZone: timeZone)),
       [
         "agentsview", "usage", "daily", "--format", "json", "--breakdown", "--agent",
-        "future-agent_v2", "--since", "30d", "--timezone", "America/New_York", "--no-sync",
+        "future-agent_v2", "--since", "2026-07-12", "--timezone", "America/New_York", "--no-sync",
       ])
   }
 
@@ -20,10 +22,12 @@ final class UsageAgentTests: XCTestCase {
     let timeZone = TimeZone(identifier: "America/New_York")!
 
     XCTAssertEqual(
-      UsageAgent.discoveryCommand(in: timeZone),
+      UsageAgent.discoveryCommand(
+        using: UsageDateContext(
+          now: DateHelper.date(fromKey: "2026-08-10", in: timeZone)!, timeZone: timeZone)),
       [
         "agentsview", "usage", "daily", "--format", "json", "--breakdown", "--since",
-        "30d", "--timezone", "America/New_York",
+        "2026-07-12", "--timezone", "America/New_York",
       ])
   }
 

@@ -8,8 +8,11 @@ struct UsageDateContext: Sendable {
   let usageWindowStartKey: String
   let startOfToday: Date
   let startOfNextDay: Date
+  let includesYear: Bool
+  let yearStart: Date
+  let yearEnd: Date
 
-  init(now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent) {
+  init(now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent, includesYear: Bool = false) {
     let capturedTimeZone = TimeZone(identifier: timeZone.identifier) ?? timeZone
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = capturedTimeZone
@@ -18,9 +21,11 @@ struct UsageDateContext: Sendable {
       let startOfNextDay = calendar.date(
         byAdding: .day,
         value: 1, to: startOfToday),
-      let usageWindowStart = calendar.date(
+      let recentWindowStart = calendar.date(
         byAdding: .day,
-        value: -29, to: startOfToday)
+        value: -29, to: startOfToday),
+      let month = calendar.dateInterval(of: .month, for: now),
+      let yearStart = calendar.date(byAdding: .month, value: -11, to: month.start)
     else {
       preconditionFailure("Unable to calculate usage date bounds")
     }
@@ -29,9 +34,13 @@ struct UsageDateContext: Sendable {
     self.timeZone = capturedTimeZone
     self.calendar = calendar
     self.todayKey = DateHelper.dateKey(for: now, in: capturedTimeZone)
-    self.usageWindowStartKey = DateHelper.dateKey(for: usageWindowStart, in: capturedTimeZone)
+    self.usageWindowStartKey = DateHelper.dateKey(
+      for: includesYear ? yearStart : recentWindowStart, in: capturedTimeZone)
     self.startOfToday = startOfToday
     self.startOfNextDay = startOfNextDay
+    self.includesYear = includesYear
+    self.yearStart = yearStart
+    self.yearEnd = month.end
   }
 }
 

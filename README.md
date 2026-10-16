@@ -4,10 +4,12 @@ VibePulse is a macOS menu bar app that tracks token spend for locally used AI co
 
 ## Highlights
 
-- Agents parsed by the installed agentsview version should work automatically once they have positive-cost local usage in the past 30 days
+- Agents parsed by the installed agentsview version appear when they have positive-cost usage in the selected history window
 - Combined daily total in the menu bar (what you would pay per token without a subscription)
 - Today view shows cumulative spend over the day
-- 30-day view shows daily totals with per-tool breakdown
+- 7-day and 30-day views show daily totals
+- 1-year view shows monthly totals for the last 12 calendar months, including the current month
+- Group charts by agent, model, or machine
 - Configurable refresh schedule
 - Built-in data maintenance for historical imports
 
@@ -22,7 +24,7 @@ VibePulse is a macOS menu bar app that tracks token spend for locally used AI co
 
 - macOS 13+ (Ventura)
 - [agentsview](https://github.com/kenn-io/agentsview) current release installed with `usage daily --timezone` support (`agentsview` on PATH or path set in Settings)
-- Local usage from at least one agentsview-parsed agent with priced activity in the past 30 days
+- Local usage from at least one agentsview-parsed agent with priced activity in the past year
 
 ## Install
 
@@ -59,18 +61,20 @@ For mise installations, VibePulse automatically checks `~/.local/share/mise/shim
   <img src="docs/screenshots/vibepulse_settings.png" alt="Settings" width="50%" />
 </p>
 
-- **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days. Turning one off hides it from totals and charts without stopping imports or deleting history.
+- **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days, or the past 12 calendar months after selecting **1 Year**. Turning one off hides it from totals and charts without stopping imports or deleting history.
 - **Startup**: Start VibePulse at login (macOS may require approval).
 - **Dependencies**: Set an `agentsview pg serve` URL, or a custom local `agentsview` path.
 - **Refresh**: Choose how often the app refreshes (5m, 15m, 1h, 4h, 1d). Opening the menu reuses fresh data until that interval expires. The Refresh button always fetches immediately.
 - **Data Maintenance**: Normalize historical data and rerun import fixes.
+
+Select **1 Year** to import older history and show monthly totals. The first load can take longer than a normal refresh. The app keeps that history locally and reuses the year import for the rest of the day while it is running. Between year imports, scheduled refreshes fetch only 30 days. While viewing the year, a new day or source/timezone change renews the year import, and **Refresh** reloads it immediately.
 
 ## Security & privacy
 
 - All usage data stays local on your machine.
 - The database lives at `~/Library/Application Support/VibePulse/vibepulse.sqlite`.
 - VibePulse has no analytics or telemetry.
-- It runs one aggregate 30-day agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Reports come from the configured server when present, otherwise from the local CLI. The Machine view uses labels from the CLI report or the configured server to show names instead of installation IDs.
+- It runs one aggregate agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Normal refreshes cover 30 days; year imports cover the last 12 calendar months. Reports come from the configured server when present, otherwise from the local CLI. The Machine view uses labels from the CLI report or the configured server to show names instead of installation IDs.
 
 ## Troubleshooting
 

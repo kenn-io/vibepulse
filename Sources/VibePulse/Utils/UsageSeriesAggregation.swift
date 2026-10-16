@@ -1,6 +1,24 @@
 import Foundation
 
 enum UsageSeriesAggregation {
+  static func monthlySeries(from points: [UsageSeriesPoint], context: UsageDateContext)
+    -> [UsageSeriesPoint]
+  {
+    var totals: [Date: [UsageSeriesKey: Double]] = [:]
+    for point in points where point.date >= context.yearStart && point.date < context.startOfNextDay
+    {
+      guard let month = context.calendar.dateInterval(of: .month, for: point.date)?.start else {
+        continue
+      }
+      totals[month, default: [:]][point.series, default: 0] += point.cost
+    }
+    return totals.keys.sorted().flatMap { month in
+      totals[month]!.sorted { $0.key.sortKey < $1.key.sortKey }.map { series, cost in
+        UsageSeriesPoint(series: series, date: month, cost: cost)
+      }
+    }
+  }
+
   static func cumulativeMachineSeries(from samples: [MachineUsageSample]) -> [UsageSeriesPoint] {
     let samplesByMachine = Dictionary(grouping: samples) { $0.machineName }
 

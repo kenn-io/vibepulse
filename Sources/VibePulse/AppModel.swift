@@ -6,17 +6,27 @@ final class AppModel: ObservableObject {
   @Published var menuTotalText: String = Formatters.currencyString(0)
   @Published var cumulativeSeries: [UsageSeriesPoint] = []
   @Published var dailySeries: [UsageSeriesPoint] = []
+  @Published var monthlySeries: [UsageSeriesPoint] = []
   @Published var toolTotals: [ToolTotal] = []
   @Published var modelCumulativeSeries: [UsageSeriesPoint] = []
   @Published var modelDailySeries: [UsageSeriesPoint] = []
+  @Published var modelMonthlySeries: [UsageSeriesPoint] = []
   @Published var modelTotals: [ToolTotal] = []
   @Published var machineCumulativeSeries: [UsageSeriesPoint] = []
   @Published var machineDailySeries: [UsageSeriesPoint] = []
+  @Published var machineMonthlySeries: [UsageSeriesPoint] = []
   @Published var machineTotals: [ToolTotal] = []
   @Published var lastUpdated: Date?
   @Published var statusMessage: String?
   @Published var isRefreshing = false
   @Published var isMaintaining = false
+  @Published var chartMode: ChartMode = .today {
+    didSet {
+      guard chartMode != oldValue else { return }
+      if chartMode == .oneYear || oldValue == .oneYear { reloadFromStoreIfTimezoneReady() }
+      if chartMode == .oneYear { refreshIfNeeded() }
+    }
+  }
   @Published var maintenanceMode: MaintenanceMode {
     didSet {
       defaults.set(maintenanceMode.rawValue, forKey: DefaultsKey.maintenanceMode)
@@ -39,6 +49,7 @@ final class AppModel: ObservableObject {
         agentsviewPath, forKey: DefaultsKey.agentsviewPath
       )
       sourceConfigurationGeneration += 1
+      lastYearRefresh = nil
       lastUpdated = nil
     }
   }
@@ -48,6 +59,7 @@ final class AppModel: ObservableObject {
         agentsviewServerURL, forKey: DefaultsKey.agentsviewServerURL
       )
       sourceConfigurationGeneration += 1
+      lastYearRefresh = nil
       lastUpdated = nil
     }
   }
@@ -73,6 +85,7 @@ final class AppModel: ObservableObject {
   private let store: UsageStore
   private let refreshService: UsageRefreshService
   private var sourceConfigurationGeneration = 0
+  private var lastYearRefresh: UsageDateContext?
 
   init(
     defaults: UserDefaults = .standard,
@@ -156,23 +169,36 @@ final class AppModel: ObservableObject {
   func refreshIfNeeded(now: Date = Date()) {
     let context = UsageDateContext(now: now)
     if let lastUpdated, statusMessage == nil,
+      !needsYearRefresh(context: context),
       !timezoneRefreshState.shouldInvalidateCurrentDay(for: context.timeZone.identifier),
       lastUpdated >= context.startOfToday, lastUpdated <= now,
       now.timeIntervalSince(lastUpdated) < Double(refreshInterval.seconds)
     {
       return
     }
-    refreshNow(now: now)
+    refreshNow(now: now, refreshHistory: false)
   }
 
-  func refreshNow(now: Date = Date()) {
+  private func needsYearRefresh(context: UsageDateContext) -> Bool {
+    guard chartMode == .oneYear else { return false }
+    guard let lastYearRefresh else { return true }
+    return lastYearRefresh.todayKey != context.todayKey
+      || lastYearRefresh.timeZone.identifier != context.timeZone.identifier
+      || lastYearRefresh.now > context.now
+  }
+
+  func refreshNow(now: Date = Date(), refreshHistory: Bool = true) {
     guard !isRefreshing else { return }
 
     isRefreshing = true
     statusMessage = nil
 
     let sourceGeneration = sourceConfigurationGeneration
-    let context = UsageDateContext(now: now)
+    let includeYear =
+      (refreshHistory && chartMode == .oneYear)
+      || needsYearRefresh(context: UsageDateContext(now: now))
+    let context = UsageDateContext(now: now, includesYear: includeYear)
+    if includeYear { lastYearRefresh = nil }
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
     if invalidateCurrentDay {
@@ -193,8 +219,12 @@ final class AppModel: ObservableObject {
             return
           }
 
-          self.discoveredAgents = result.discoveredAgents
-          self.agentPreferences.saveDiscoveredAgents(result.discoveredAgents)
+          // Recent discovery must not hide agents that only have older usage.
+          self.discoveredAgents =
+            !context.includesYear && self.lastYearRefresh != nil
+            ? Array(Set(self.discoveredAgents + result.discoveredAgents)).sorted()
+            : result.discoveredAgents
+          self.agentPreferences.saveDiscoveredAgents(self.discoveredAgents)
           if let machineLabels = result.machineLabels {
             self.machineLabelSnapshot = machineLabels
             self.defaults.set(
@@ -204,6 +234,7 @@ final class AppModel: ObservableObject {
             self.statusMessage = nil
             if self.sourceConfigurationGeneration == sourceGeneration {
               self.lastUpdated = context.now
+              if context.includesYear { self.lastYearRefresh = context }
             }
           } else {
             self.statusMessage = result.importErrors.joined(separator: " | ")
@@ -215,6 +246,9 @@ final class AppModel: ObservableObject {
           self.persistTimezoneRefreshState()
           self.reloadFromStore(context: UsageDateContext())
           self.isRefreshing = false
+          if !context.includesYear && self.needsYearRefresh(context: UsageDateContext()) {
+            self.refreshIfNeeded()
+          }
         }
       } catch {
         DispatchQueue.main.async {
@@ -228,7 +262,9 @@ final class AppModel: ObservableObject {
             self.reloadFromStoreIfTimezoneReady()
           }
           self.isRefreshing = false
-          if !contextStillCurrent {
+          if !contextStillCurrent
+            || (!context.includesYear && self.needsYearRefresh(context: UsageDateContext()))
+          {
             self.refreshNow()
           }
         }
@@ -257,14 +293,18 @@ final class AppModel: ObservableObject {
     menuTotalText = Formatters.currencyString(0)
     cumulativeSeries = []
     dailySeries = []
+    monthlySeries = []
     toolTotals = []
     modelCumulativeSeries = []
     modelDailySeries = []
+    modelMonthlySeries = []
     modelTotals = []
     machineCumulativeSeries = []
     machineDailySeries = []
+    machineMonthlySeries = []
     machineTotals = []
     lastUpdated = nil
+    lastYearRefresh = nil
   }
 
   private func showWelcomeIfNeeded() {
@@ -330,7 +370,9 @@ final class AppModel: ObservableObject {
     let machineSamples = store.fetchMachineSamples(tools: tools, from: startOfDay, to: now)
     machineCumulativeSeries = UsageSeriesAggregation.cumulativeMachineSeries(from: machineSamples)
 
-    let sinceKey = context.usageWindowStartKey
+    let displayContext = UsageDateContext(
+      now: context.now, timeZone: context.timeZone, includesYear: chartMode == .oneYear)
+    let sinceKey = displayContext.usageWindowStartKey
     let rollups = store.fetchDailyRollups(
       since: sinceKey,
       through: context.todayKey,
@@ -361,6 +403,14 @@ final class AppModel: ObservableObject {
     machineDailySeries = UsageSeriesAggregation.dailyMachineSeries(
       from: machineRollups,
       timeZone: context.timeZone)
+    if chartMode == .oneYear {
+      monthlySeries = UsageSeriesAggregation.monthlySeries(
+        from: dailySeries, context: displayContext)
+      modelMonthlySeries = UsageSeriesAggregation.monthlySeries(
+        from: modelDailySeries, context: displayContext)
+      machineMonthlySeries = UsageSeriesAggregation.monthlySeries(
+        from: machineDailySeries, context: displayContext)
+    }
 
     var totals: [ToolTotal] = []
     for tool in tools {
@@ -527,7 +577,7 @@ final class AppModel: ObservableObject {
       deadline: .now() + .seconds(intervalSeconds), repeating: .seconds(intervalSeconds))
     timer.setEventHandler { [weak self] in
       Task { @MainActor in
-        self?.refreshNow()
+        self?.refreshNow(refreshHistory: false)
       }
     }
     timer.resume()

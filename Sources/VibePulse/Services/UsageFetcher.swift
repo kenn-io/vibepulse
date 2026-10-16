@@ -29,7 +29,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
     try withRetry {
       let data = try fetchUsageData(
-        command: UsageAgent.discoveryCommand(in: context.timeZone),
+        command: UsageAgent.discoveryCommand(using: context),
         agent: nil,
         context: context)
       let agents = try Self.parseDiscoveredAgents(data: data)
@@ -49,14 +49,14 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       let data: Data
       do {
         data = try fetchUsageData(
-          command: tool.dailyCommand(in: context.timeZone),
+          command: tool.dailyCommand(using: context),
           agent: tool.rawValue,
           context: context)
       } catch FetchError.commandFailed(let output)
         where Self.isUnsupportedBreakdownError(output)
       {
         data = try executeAgentsviewCommand(
-          tool.dailyCommand(in: context.timeZone).filter { $0 != "--breakdown" })
+          tool.dailyCommand(using: context).filter { $0 != "--breakdown" })
       }
       let totals = try Self.parseDailyTotals(data: data)
       guard
@@ -99,8 +99,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     let url = try Self.makeServerURL(
       configuredURL: configuredURL,
       agent: agent,
-      now: context.now,
-      timeZone: context.timeZone)
+      context: context)
     return try Data(contentsOf: url)
   }
 
@@ -120,8 +119,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   static func makeServerURL(
     configuredURL: String,
     agent: String?,
-    now: Date,
-    timeZone: TimeZone
+    context: UsageDateContext
   ) throws -> URL {
     let baseURL = normalizedServerURL(configuredURL)
     guard
@@ -131,18 +129,10 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       throw FetchError.invalidServerURL(configuredURL)
     }
 
-    let formatter = DateFormatter()
-    formatter.calendar = Calendar(identifier: .gregorian)
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = timeZone
-    formatter.dateFormat = "yyyy-MM-dd"
-    let from = formatter.string(
-      from: now.addingTimeInterval(-30 * 24 * 60 * 60))
-
     components.queryItems = [
-      URLQueryItem(name: "from", value: from),
+      URLQueryItem(name: "from", value: context.usageWindowStartKey),
       URLQueryItem(name: "no_default_range", value: "true"),
-      URLQueryItem(name: "timezone", value: timeZone.identifier),
+      URLQueryItem(name: "timezone", value: context.timeZone.identifier),
       URLQueryItem(name: "breakdowns", value: "true"),
     ]
     if let agent {

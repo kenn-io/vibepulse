@@ -4,7 +4,7 @@ import SwiftUI
 struct MenuContentView: View {
   @EnvironmentObject private var model: AppModel
   @EnvironmentObject private var updaterController: UpdaterController
-  @State private var chartMode: ChartMode = .today
+  private var chartMode: ChartMode { model.chartMode }
   @State private var aggregationMode: UsageAggregationMode = .agent
 
   private let legendRowHeight: CGFloat = 28
@@ -18,14 +18,14 @@ struct MenuContentView: View {
       totalSection
       selectorControls
 
-      Text(chartMode == .today ? "Cumulative" : "By Day")
+      Text(chartMode == .today ? "Cumulative" : (chartMode == .oneYear ? "By Month" : "By Day"))
         .font(.caption)
         .foregroundColor(.secondary)
 
       UsageChartView(
         mode: chartMode,
         cumulativeSeries: visibleCumulativeSeries,
-        dailySeries: visibleDailySeries,
+        historySeries: visibleDailySeries,
         palette: palette,
         machineLabels: model.machineLabels)
 
@@ -54,7 +54,7 @@ struct MenuContentView: View {
     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
       GridRow {
         selectorLabel("View")
-        Picker("View", selection: $chartMode) {
+        Picker("View", selection: $model.chartMode) {
           ForEach(ChartMode.allCases) { mode in
             Text(mode.title).tag(mode)
           }
@@ -202,7 +202,7 @@ struct MenuContentView: View {
     case .today:
       let total = selectedTotals.reduce(0) { $0 + $1.totalCost }
       return Formatters.currencyString(total)
-    case .sevenDays, .thirtyDays:
+    case .sevenDays, .thirtyDays, .oneYear:
       let total = visibleDailySeries.reduce(0) { $0 + $1.cost }
       return Formatters.currencyString(total)
     }
@@ -216,6 +216,8 @@ struct MenuContentView: View {
       return "Combined (last 7 days) by \(aggregationMode.title.lowercased())"
     case .thirtyDays:
       return "Combined (last 30 days) by \(aggregationMode.title.lowercased())"
+    case .oneYear:
+      return "Combined (last 12 months) by \(aggregationMode.title.lowercased())"
     }
   }
 
@@ -224,7 +226,7 @@ struct MenuContentView: View {
     switch chartMode {
     case .today:
       totals = selectedTotals.filter { $0.totalCost > 0.0001 }
-    case .sevenDays, .thirtyDays:
+    case .sevenDays, .thirtyDays, .oneYear:
       var totalsBySeries: [UsageSeriesKey: Double] = [:]
       for point in visibleDailySeries {
         totalsBySeries[point.series, default: 0] += point.cost
@@ -283,7 +285,16 @@ struct MenuContentView: View {
   }
 
   private var visibleDailySeries: [UsageSeriesPoint] {
-    UsageSeriesFilters.visibleDailySeries(selectedDailySeries, mode: chartMode)
+    if chartMode == .oneYear {
+      let points: [UsageSeriesPoint]
+      switch aggregationMode {
+      case .agent: points = model.monthlySeries
+      case .model: points = model.modelMonthlySeries
+      case .machine: points = model.machineMonthlySeries
+      }
+      return points.filter { $0.cost > UsageSeriesFilters.minimumVisibleCost }
+    }
+    return UsageSeriesFilters.visibleDailySeries(selectedDailySeries, mode: chartMode)
   }
 }
 
