@@ -67,7 +67,7 @@ final class AppModelRefreshTests: XCTestCase {
 
     model.refreshIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.requestCount, 2)
+    XCTAssertEqual(fetcher.requestCount, 3)
     XCTAssertNotNil(model.lastUpdated)
   }
 
@@ -104,12 +104,12 @@ final class AppModelRefreshTests: XCTestCase {
     model.agentsviewServerURL = "https://example.com"
     model.refreshIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.requestCount, 2)
+    XCTAssertEqual(fetcher.requestCount, 3)
 
     model.agentsviewPath = "/example/agentsview"
     model.refreshIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.requestCount, 3)
+    XCTAssertEqual(fetcher.requestCount, 5)
   }
 
   @MainActor
@@ -165,7 +165,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testAutomatedSettingPersistsAndReplacesCachedCosts() async throws {
+  func testAutomatedSettingPersistsAndSelectsSeparateHistories() async throws {
     let suite = "VibePulseTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
@@ -173,27 +173,93 @@ final class AppModelRefreshTests: XCTestCase {
     defaults.set("manual", forKey: "maintenanceMode")
     defaults.set("https://example.com", forKey: "agentsviewServerURL")
     let store = try UsageStore(path: ":memory:")
-    let model = AppModel(defaults: defaults, store: store, fetcher: AutomatedUsageFetcher())
+    let excludedStore = try UsageStore(path: ":memory:")
+    let model = AppModel(
+      defaults: defaults, store: store, nonAutomatedStore: excludedStore,
+      fetcher: AutomatedUsageFetcher())
     await finishRefresh(model)
     XCTAssertTrue(model.includeAutomatedSessions)
     XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 100)
 
-    model.includeAutomatedSessions = false
+    model.chartMode = .oneYear
     await finishRefresh(model)
+    model.includeAutomatedSessions = false
+    XCTAssertFalse(model.isRefreshing)
     XCTAssertEqual(defaults.object(forKey: "includeAutomatedSessions") as? Bool, false)
-    XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 10)
+    XCTAssertEqual(excludedStore.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 10)
+    XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 100)
     XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
     let oldestDate = DateHelper.dateKey(for: UsageDateContext().yearStart)
-    XCTAssertEqual(store.dailyTotal(for: oldestDate, tool: .codex), 10)
+    XCTAssertEqual(excludedStore.dailyTotal(for: oldestDate, tool: .codex), 10)
 
-    let reopened = AppModel(defaults: defaults, store: store, fetcher: AutomatedUsageFetcher())
+    let reopened = AppModel(
+      defaults: defaults, store: store, nonAutomatedStore: excludedStore,
+      fetcher: AutomatedUsageFetcher())
     await finishRefresh(reopened)
     XCTAssertFalse(reopened.includeAutomatedSessions)
     XCTAssertEqual(reopened.menuTotalText, Formatters.currencyString(10))
     reopened.includeAutomatedSessions = true
-    await finishRefresh(reopened)
+    XCTAssertFalse(reopened.isRefreshing)
     XCTAssertEqual(reopened.menuTotalText, Formatters.currencyString(100))
     XCTAssertEqual(store.dailyTotal(for: oldestDate, tool: .codex), 100)
+  }
+
+  @MainActor
+  func testTogglingDuringRefreshPreservesBothSampleHistories() async throws {
+    let suite = "VibePulseTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(true, forKey: "hasSeenWelcome")
+    defaults.set("manual", forKey: "maintenanceMode")
+    defaults.set("https://example.com", forKey: "agentsviewServerURL")
+    defaults.set(false, forKey: "includeAutomatedSessions")
+    let combined = try UsageStore(path: ":memory:")
+    let excluded = try UsageStore(path: ":memory:")
+    let blocked = expectation(description: "combined report blocked")
+    let fetcher = BlockingScopeFetcher(blocked: blocked)
+    defer { fetcher.resume.signal() }
+    let model = AppModel(
+      defaults: defaults, store: combined,
+      nonAutomatedStore: excluded, fetcher: fetcher)
+    await finishRefresh(model)
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+
+    model.refreshNow()
+    await fulfillment(of: [blocked], timeout: 3)
+    model.includeAutomatedSessions = true
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(100))
+    model.includeAutomatedSessions = false
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+    fetcher.resume.signal()
+    await finishRefresh(model)
+
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(20))
+    XCTAssertEqual(model.modelCumulativeSeries.last?.cost, 20)
+    XCTAssertEqual(model.machineCumulativeSeries.last?.cost, 20)
+    let context = UsageDateContext()
+    XCTAssertEqual(
+      excluded.fetchModelSamples(
+        tools: [.codex], from: context.startOfToday,
+        to: context.startOfNextDay
+      ).map(\.totalCost), [10, 20])
+    XCTAssertEqual(
+      combined.fetchModelSamples(
+        tools: [.codex], from: context.startOfToday,
+        to: context.startOfNextDay
+      ).map(\.totalCost), [100, 200])
+    XCTAssertEqual(
+      excluded.fetchMachineSamples(
+        tools: [.codex], from: context.startOfToday,
+        to: context.startOfNextDay
+      ).map(\.totalCost), [10, 20])
+    XCTAssertEqual(
+      combined.fetchMachineSamples(
+        tools: [.codex], from: context.startOfToday,
+        to: context.startOfNextDay
+      ).map(\.totalCost), [100, 200])
+    model.includeAutomatedSessions = true
+    XCTAssertFalse(model.isRefreshing)
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(200))
   }
 
   @MainActor
@@ -261,5 +327,37 @@ private struct AutomatedUsageFetcher: UsageFetching {
       rows.append(DailyTotal(dateKey: context.usageWindowStartKey, cost: cost))
     }
     return rows
+  }
+}
+
+private final class BlockingScopeFetcher: UsageFetching, @unchecked Sendable {
+  let resume = DispatchSemaphore(value: 0)
+  private let blocked: XCTestExpectation
+  private let lock = NSLock()
+  private var counts: [Bool: Int] = [:]
+
+  init(blocked: XCTestExpectation) { self.blocked = blocked }
+  func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] { [.codex] }
+  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
+    -> [DailyTotal]
+  {
+    let count = lock.withLock {
+      counts[context.includeAutomated, default: 0] += 1
+      return counts[context.includeAutomated]!
+    }
+    if context.includeAutomated && count == 2 {
+      blocked.fulfill()
+      guard resume.wait(timeout: .now() + 3) == .success else {
+        throw UsageFetcher.FetchError.invalidOutput
+      }
+    }
+    let cost = Double(count) * (context.includeAutomated ? 100 : 10)
+    return [
+      DailyTotal(
+        dateKey: context.todayKey, cost: cost,
+        modelBreakdowns: [DailyModelBreakdown(modelName: "test-model", cost: cost)],
+        machineBreakdowns: [DailyMachineBreakdown(machineName: "test-machine", cost: cost)])
+    ]
   }
 }

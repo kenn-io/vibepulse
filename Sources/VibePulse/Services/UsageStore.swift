@@ -12,13 +12,14 @@ final class UsageStore: @unchecked Sendable {
   private let queue = DispatchQueue(label: "vibepulse.store")
   private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-  static func defaultStore() throws -> UsageStore {
+  static func defaultStore(includeAutomated: Bool = true) throws -> UsageStore {
     let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
       .first
     let appSupport = baseURL?.appendingPathComponent("VibePulse", isDirectory: true)
     if let appSupport {
       try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
-      let dbURL = appSupport.appendingPathComponent("vibepulse.sqlite")
+      let filename = includeAutomated ? "vibepulse.sqlite" : "vibepulse-non-automated.sqlite"
+      let dbURL = appSupport.appendingPathComponent(filename)
       return try UsageStore(path: dbURL.path)
     }
     return try UsageStore(path: ":memory:")

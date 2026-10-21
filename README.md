@@ -62,7 +62,7 @@ For mise installations, VibePulse automatically checks `~/.local/share/mise/shim
 </p>
 
 - **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days, or the past 12 calendar months after selecting **1 Year**. Turning one off hides it from totals and charts without stopping imports or deleting history.
-- **Include automated sessions**: Enabled by default under Data Sources. Turn it off to exclude automated reviews from server reports. Changing it reloads cached history. This setting is unavailable with the local CLI, which always includes automated sessions.
+- **Include automated sessions**: Enabled by default under Data Sources. Turn it off to exclude automated reviews from server reports. Both reports are fetched on every server refresh and cached separately, so changing this setting switches histories without fetching again. This setting is unavailable with the local CLI, which always includes automated sessions.
 - **Startup**: Start VibePulse at login (macOS may require approval).
 - **Dependencies**: Set an `agentsview pg serve` URL, or a custom local `agentsview` path.
 - **Refresh**: Choose how often the app refreshes (5m, 15m, 1h, 4h, 1d). Opening the menu reuses fresh data until that interval expires. The Refresh button always fetches immediately.
@@ -73,9 +73,9 @@ Select **1 Year** to import older history and show monthly totals. The first loa
 ## Security & privacy
 
 - All usage data stays local on your machine.
-- The database lives at `~/Library/Application Support/VibePulse/vibepulse.sqlite`.
+- Usage databases live in `~/Library/Application Support/VibePulse/`: `vibepulse.sqlite` holds combined usage and `vibepulse-non-automated.sqlite` holds usage without automation.
 - VibePulse has no analytics or telemetry.
-- It runs one aggregate agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Normal refreshes cover 30 days; year imports cover the last 12 calendar months. Reports come from the configured server when present, otherwise from the local CLI. The Machine view uses labels from the CLI report or the configured server to show names instead of installation IDs.
+- It runs an aggregate agentsview usage report to discover agents, then filtered per-agent reports to store their usage. Server connections fetch both combined and non-automated reports; the local CLI supplies only combined usage. Normal refreshes cover 30 days; year imports cover the last 12 calendar months. Reports come from the configured server when present, otherwise from the local CLI. The Machine view uses labels from the CLI report or the configured server to show names instead of installation IDs.
 
 ## Troubleshooting
 

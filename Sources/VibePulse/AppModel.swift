@@ -68,19 +68,12 @@ final class AppModel: ObservableObject {
     didSet {
       guard includeAutomatedSessions != oldValue else { return }
       defaults.set(includeAutomatedSessions, forKey: DefaultsKey.includeAutomatedSessions)
-      lastUpdated = nil
-      lastYearRefresh = nil
-      clearPublishedUsage()
-      refreshNow()
+      reloadFromStoreIfTimezoneReady()
     }
   }
   private var effectiveIncludeAutomated: Bool {
     agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       || includeAutomatedSessions
-  }
-  private var usageScopeChanged: Bool {
-    (defaults.object(forKey: DefaultsKey.lastUsageIncludeAutomated) as? Bool ?? true)
-      != effectiveIncludeAutomated
   }
   @Published private(set) var machineLabelSnapshot: MachineLabels?
   @Published private(set) var discoveredAgents: [UsageAgent]
@@ -101,14 +94,20 @@ final class AppModel: ObservableObject {
   private var timeZoneObserver: NSObjectProtocol?
   private var timezoneRefreshState: UsageRefreshTimezoneState
   private var isUpdatingLoginItem = false
-  private let store: UsageStore
+  private let combinedStore: UsageStore
+  private let nonAutomatedStore: UsageStore
+  private var store: UsageStore {
+    effectiveIncludeAutomated ? combinedStore : nonAutomatedStore
+  }
   private let refreshService: UsageRefreshService
+  private let nonAutomatedRefreshService: UsageRefreshService
   private var sourceConfigurationGeneration = 0
   private var lastYearRefresh: UsageDateContext?
 
   init(
     defaults: UserDefaults = .standard,
     store suppliedStore: UsageStore? = nil,
+    nonAutomatedStore suppliedNonAutomatedStore: UsageStore? = nil,
     fetcher: UsageFetching = UsageFetcher()
   ) {
     self.defaults = defaults
@@ -149,13 +148,22 @@ final class AppModel: ObservableObject {
       loginItemMessage = "Enable VibePulse in System Settings > Login Items."
     }
 
+    let stores: (UsageStore, UsageStore)
     do {
-      store = try suppliedStore ?? UsageStore.defaultStore()
+      stores = (
+        try suppliedStore ?? UsageStore.defaultStore(),
+        try suppliedNonAutomatedStore
+          ?? (suppliedStore != nil
+            ? UsageStore(path: ":memory:") : UsageStore.defaultStore(includeAutomated: false))
+      )
     } catch {
-      store = try! UsageStore(path: ":memory:")
+      stores = (try! UsageStore(path: ":memory:"), try! UsageStore(path: ":memory:"))
       statusMessage = "Database unavailable. Running without persistence."
     }
-    refreshService = UsageRefreshService(fetcher: fetcher, store: store)
+    combinedStore = stores.0
+    nonAutomatedStore = stores.1
+    refreshService = UsageRefreshService(fetcher: fetcher, store: combinedStore)
+    nonAutomatedRefreshService = UsageRefreshService(fetcher: fetcher, store: nonAutomatedStore)
     timeZoneObserver = NotificationCenter.default.addObserver(
       forName: .NSSystemTimeZoneDidChange,
       object: nil,
@@ -167,9 +175,8 @@ final class AppModel: ObservableObject {
     }
 
     let initialContext = UsageDateContext()
-    if !usageScopeChanged
-      && !timezoneRefreshState.shouldInvalidateCurrentDay(
-        for: initialContext.timeZone.identifier)
+    if !timezoneRefreshState.shouldInvalidateCurrentDay(
+      for: initialContext.timeZone.identifier)
     {
       reloadFromStore(context: initialContext)
     }
@@ -190,7 +197,7 @@ final class AppModel: ObservableObject {
 
   func refreshIfNeeded(now: Date = Date()) {
     let context = UsageDateContext(now: now)
-    if let lastUpdated, statusMessage == nil, !usageScopeChanged,
+    if let lastUpdated, statusMessage == nil,
       !needsYearRefresh(context: context),
       !timezoneRefreshState.shouldInvalidateCurrentDay(for: context.timeZone.identifier),
       lastUpdated >= context.startOfToday, lastUpdated <= now,
@@ -216,29 +223,42 @@ final class AppModel: ObservableObject {
     statusMessage = nil
 
     let sourceGeneration = sourceConfigurationGeneration
-    let scopeChanged = usageScopeChanged
     let includeYear =
-      scopeChanged || (refreshHistory && chartMode == .oneYear)
+      (refreshHistory && chartMode == .oneYear)
       || needsYearRefresh(context: UsageDateContext(now: now))
     let context = UsageDateContext(
-      now: now, includesYear: includeYear, includeAutomated: effectiveIncludeAutomated)
+      now: now, includesYear: includeYear)
     let retainedAgents = !includeYear && lastYearRefresh != nil ? discoveredAgents : []
     if includeYear { lastYearRefresh = nil }
-    let invalidateCurrentDay =
-      scopeChanged
-      || timezoneRefreshState.shouldInvalidateCurrentDay(
-        for: context.timeZone.identifier)
+    let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
+      for: context.timeZone.identifier)
     if invalidateCurrentDay {
       clearPublishedUsage()
     }
 
-    DispatchQueue.global(qos: .background).async { [refreshService] in
+    let fetchBoth = !agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let retainedNonAutomatedAgents =
+      !includeYear && lastYearRefresh != nil ? nonAutomatedStore.storedAgents() : []
+    DispatchQueue.global(qos: .background).async { [refreshService, nonAutomatedRefreshService] in
       do {
-        let result = try refreshService.refresh(
+        var result = try refreshService.refresh(
           context: context,
           retainedAgents: retainedAgents,
           invalidateCurrentDay: invalidateCurrentDay)
-
+        if fetchBoth {
+          let nonAutomated = try nonAutomatedRefreshService.refresh(
+            context: UsageDateContext(
+              now: context.now, timeZone: context.timeZone,
+              includesYear: context.includesYear, includeAutomated: false),
+            retainedAgents: retainedNonAutomatedAgents,
+            invalidateCurrentDay: invalidateCurrentDay)
+          result = UsageRefreshResult(
+            discoveredAgents: Array(Set(result.discoveredAgents + nonAutomated.discoveredAgents))
+              .sorted(),
+            importErrors: result.importErrors + nonAutomated.importErrors,
+            machineLabels: result.machineLabels)
+        }
+        let completedResult = result
         DispatchQueue.main.async {
           guard UsageDateContext().timeZone.identifier == context.timeZone.identifier else {
             self.timezoneRefreshState.markTimezoneChange()
@@ -247,33 +267,26 @@ final class AppModel: ObservableObject {
             return
           }
 
-          guard context.includeAutomated == self.effectiveIncludeAutomated else {
-            self.isRefreshing = false
-            self.refreshNow()
-            return
-          }
-          self.discoveredAgents = result.discoveredAgents
+          self.discoveredAgents = completedResult.discoveredAgents
           self.agentPreferences.saveDiscoveredAgents(self.discoveredAgents)
-          if let machineLabels = result.machineLabels {
+          if let machineLabels = completedResult.machineLabels {
             self.machineLabelSnapshot = machineLabels
             self.defaults.set(
               try? JSONEncoder().encode(machineLabels), forKey: DefaultsKey.machineLabels)
           }
-          if result.importErrors.isEmpty {
+          if completedResult.importErrors.isEmpty {
             self.statusMessage = nil
             if self.sourceConfigurationGeneration == sourceGeneration {
-              self.defaults.set(
-                context.includeAutomated, forKey: DefaultsKey.lastUsageIncludeAutomated)
               self.lastUpdated = context.now
               if context.includesYear { self.lastYearRefresh = context }
             }
           } else {
-            self.statusMessage = result.importErrors.joined(separator: " | ")
+            self.statusMessage = completedResult.importErrors.joined(separator: " | ")
           }
           self.timezoneRefreshState.completeRefresh(
             for: context.timeZone.identifier,
             invalidatedCurrentDay: invalidateCurrentDay,
-            hasImportErrors: !result.importErrors.isEmpty)
+            hasImportErrors: !completedResult.importErrors.isEmpty)
           self.persistTimezoneRefreshState()
           self.reloadFromStore(context: UsageDateContext())
           self.isRefreshing = false
@@ -289,11 +302,11 @@ final class AppModel: ObservableObject {
             self.timezoneRefreshState.markTimezoneChange()
           }
           self.statusMessage = error.localizedDescription
-          if contextStillCurrent && !self.usageScopeChanged {
+          if contextStillCurrent {
             self.reloadFromStoreIfTimezoneReady()
           }
           self.isRefreshing = false
-          if context.includeAutomated != self.effectiveIncludeAutomated || !contextStillCurrent
+          if !contextStillCurrent
             || (!context.includesYear && self.needsYearRefresh(context: UsageDateContext()))
           {
             self.refreshNow()
@@ -463,7 +476,6 @@ final class AppModel: ObservableObject {
   }
 
   private func reloadFromStoreIfTimezoneReady() {
-    guard !usageScopeChanged else { return }
     let context = UsageDateContext()
     guard !timezoneRefreshState.shouldDeferStoreReload(for: context.timeZone.identifier) else {
       return
@@ -526,12 +538,15 @@ final class AppModel: ObservableObject {
     isMaintaining = true
     maintenanceMessage = nil
 
-    DispatchQueue.global(qos: .background).async { [store] in
+    DispatchQueue.global(qos: .background).async { [combinedStore, nonAutomatedStore] in
       do {
-        let dateUpdated = try store.storedAgents().reduce(0) { count, tool in
-          count + (try store.normalizeDailyRollupDates(for: tool))
-            + (try store.normalizeModelDailyRollupDates(for: tool))
-            + (try store.normalizeMachineDailyRollupDates(for: tool))
+        let dateUpdated = try [combinedStore, nonAutomatedStore].reduce(0) { total, store in
+          total
+            + (try store.storedAgents().reduce(0) { count, tool in
+              count + (try store.normalizeDailyRollupDates(for: tool))
+                + (try store.normalizeModelDailyRollupDates(for: tool))
+                + (try store.normalizeMachineDailyRollupDates(for: tool))
+            })
         }
         let message =
           "Maintenance complete. Normalized \(dateUpdated) daily totals."
@@ -621,7 +636,6 @@ final class AppModel: ObservableObject {
     static let welcomeKey = "hasSeenWelcome"
     static let refreshMinutes = "refreshMinutes"
     static let includeAutomatedSessions = "includeAutomatedSessions"
-    static let lastUsageIncludeAutomated = "lastUsageIncludeAutomated"
     static let refreshInterval = "refreshInterval"
     static let agentsviewPath = "agentsviewPath"
     static let agentsviewServerURL = "agentsviewServerURL"
