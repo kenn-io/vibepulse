@@ -134,7 +134,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       URLQueryItem(name: "no_default_range", value: "true"),
       URLQueryItem(name: "timezone", value: context.timeZone.identifier),
       URLQueryItem(name: "breakdowns", value: "true"),
-      URLQueryItem(name: "include_automated", value: "true"),
+      URLQueryItem(name: "include_automated", value: String(context.includeAutomated)),
     ]
     if let agent {
       components.queryItems?.append(URLQueryItem(name: "agent", value: agent))

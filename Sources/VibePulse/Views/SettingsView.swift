@@ -28,6 +28,16 @@ struct SettingsView: View {
   private var dataSourcesSection: some View {
     settingsSection("Data Sources") {
       VStack(alignment: .leading, spacing: 10) {
+        Toggle("Include automated sessions", isOn: $model.includeAutomatedSessions)
+          .toggleStyle(.checkbox)
+          .disabled(
+            model.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        if model.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          helperText(
+            "The local CLI always includes automated sessions. Connect to an AgentsView server to filter them."
+          )
+        }
+
         helperText(
           "Agents with priced usage in the past 30 days are discovered through agentsview. "
             + "Turning one off hides it without stopping imports or deleting history."

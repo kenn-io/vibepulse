@@ -77,6 +77,20 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertEqual(query.first { $0.name == "timezone" }?.value, "America/New_York")
   }
 
+  func testServerRequestsRespectAutomatedSessionPreference() throws {
+    for include in [true, false] {
+      for agent in [nil, "codex"] as [String?] {
+        let url = try UsageFetcher.makeServerURL(
+          configuredURL: "https://example.com", agent: agent,
+          context: UsageDateContext(includeAutomated: include))
+        let query = try XCTUnwrap(
+          URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(
+          query.first { $0.name == "include_automated" }?.value, include ? "true" : "false")
+      }
+    }
+  }
+
   func testMachinesURLUsesConfiguredServerBase() throws {
     let url = try UsageFetcher.makeMachinesURL(configuredURL: "http://127.0.0.1:18080/")
 

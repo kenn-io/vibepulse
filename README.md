@@ -62,6 +62,7 @@ For mise installations, VibePulse automatically checks `~/.local/share/mise/shim
 </p>
 
 - **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days, or the past 12 calendar months after selecting **1 Year**. Turning one off hides it from totals and charts without stopping imports or deleting history.
+- **Include automated sessions**: Enabled by default under Data Sources. Turn it off to exclude automated reviews from server reports. Changing it reloads cached history. This setting is unavailable with the local CLI, which always includes automated sessions.
 - **Startup**: Start VibePulse at login (macOS may require approval).
 - **Dependencies**: Set an `agentsview pg serve` URL, or a custom local `agentsview` path.
 - **Refresh**: Choose how often the app refreshes (5m, 15m, 1h, 4h, 1d). Opening the menu reuses fresh data until that interval expires. The Refresh button always fetches immediately.

@@ -165,6 +165,38 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
+  func testAutomatedSettingPersistsAndReplacesCachedCosts() async throws {
+    let suite = "VibePulseTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(true, forKey: "hasSeenWelcome")
+    defaults.set("manual", forKey: "maintenanceMode")
+    defaults.set("https://example.com", forKey: "agentsviewServerURL")
+    let store = try UsageStore(path: ":memory:")
+    let model = AppModel(defaults: defaults, store: store, fetcher: AutomatedUsageFetcher())
+    await finishRefresh(model)
+    XCTAssertTrue(model.includeAutomatedSessions)
+    XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 100)
+
+    model.includeAutomatedSessions = false
+    await finishRefresh(model)
+    XCTAssertEqual(defaults.object(forKey: "includeAutomatedSessions") as? Bool, false)
+    XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 10)
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+    let oldestDate = DateHelper.dateKey(for: UsageDateContext().yearStart)
+    XCTAssertEqual(store.dailyTotal(for: oldestDate, tool: .codex), 10)
+
+    let reopened = AppModel(defaults: defaults, store: store, fetcher: AutomatedUsageFetcher())
+    await finishRefresh(reopened)
+    XCTAssertFalse(reopened.includeAutomatedSessions)
+    XCTAssertEqual(reopened.menuTotalText, Formatters.currencyString(10))
+    reopened.includeAutomatedSessions = true
+    await finishRefresh(reopened)
+    XCTAssertEqual(reopened.menuTotalText, Formatters.currencyString(100))
+    XCTAssertEqual(store.dailyTotal(for: oldestDate, tool: .codex), 100)
+  }
+
+  @MainActor
   private func makeModel() throws -> (AppModel, CountingUsageFetcher, UsageStore) {
     let suite = "VibePulseTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -214,5 +246,20 @@ private final class CountingUsageFetcher: UsageFetching, @unchecked Sendable {
       }
       return [DailyTotal(dateKey: context.todayKey, cost: Double(requests))]
     }
+  }
+}
+
+private struct AutomatedUsageFetcher: UsageFetching {
+  func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] { [.codex] }
+  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
+    -> [DailyTotal]
+  {
+    let cost: Double = context.includeAutomated ? 100 : 10
+    var rows = [DailyTotal(dateKey: context.todayKey, cost: cost)]
+    if context.includesYear {
+      rows.append(DailyTotal(dateKey: context.usageWindowStartKey, cost: cost))
+    }
+    return rows
   }
 }

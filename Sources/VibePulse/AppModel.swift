@@ -64,6 +64,24 @@ final class AppModel: ObservableObject {
       lastUpdated = nil
     }
   }
+  @Published var includeAutomatedSessions: Bool {
+    didSet {
+      guard includeAutomatedSessions != oldValue else { return }
+      defaults.set(includeAutomatedSessions, forKey: DefaultsKey.includeAutomatedSessions)
+      lastUpdated = nil
+      lastYearRefresh = nil
+      clearPublishedUsage()
+      refreshNow()
+    }
+  }
+  private var effectiveIncludeAutomated: Bool {
+    agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || includeAutomatedSessions
+  }
+  private var usageScopeChanged: Bool {
+    (defaults.object(forKey: DefaultsKey.lastUsageIncludeAutomated) as? Bool ?? true)
+      != effectiveIncludeAutomated
+  }
   @Published private(set) var machineLabelSnapshot: MachineLabels?
   @Published private(set) var discoveredAgents: [UsageAgent]
   @Published private(set) var disabledAgentIDs: Set<String>
@@ -120,6 +138,8 @@ final class AppModel: ObservableObject {
       defaults.string(forKey: DefaultsKey.agentsviewPath) ?? ""
     agentsviewServerURL =
       defaults.string(forKey: DefaultsKey.agentsviewServerURL) ?? ""
+    includeAutomatedSessions =
+      defaults.object(forKey: DefaultsKey.includeAutomatedSessions) as? Bool ?? true
     machineLabelSnapshot = defaults.data(forKey: DefaultsKey.machineLabels).flatMap {
       try? JSONDecoder().decode(MachineLabels.self, from: $0)
     }
@@ -147,8 +167,9 @@ final class AppModel: ObservableObject {
     }
 
     let initialContext = UsageDateContext()
-    if !timezoneRefreshState.shouldInvalidateCurrentDay(
-      for: initialContext.timeZone.identifier)
+    if !usageScopeChanged
+      && !timezoneRefreshState.shouldInvalidateCurrentDay(
+        for: initialContext.timeZone.identifier)
     {
       reloadFromStore(context: initialContext)
     }
@@ -169,7 +190,7 @@ final class AppModel: ObservableObject {
 
   func refreshIfNeeded(now: Date = Date()) {
     let context = UsageDateContext(now: now)
-    if let lastUpdated, statusMessage == nil,
+    if let lastUpdated, statusMessage == nil, !usageScopeChanged,
       !needsYearRefresh(context: context),
       !timezoneRefreshState.shouldInvalidateCurrentDay(for: context.timeZone.identifier),
       lastUpdated >= context.startOfToday, lastUpdated <= now,
@@ -195,14 +216,18 @@ final class AppModel: ObservableObject {
     statusMessage = nil
 
     let sourceGeneration = sourceConfigurationGeneration
+    let scopeChanged = usageScopeChanged
     let includeYear =
-      (refreshHistory && chartMode == .oneYear)
+      scopeChanged || (refreshHistory && chartMode == .oneYear)
       || needsYearRefresh(context: UsageDateContext(now: now))
-    let context = UsageDateContext(now: now, includesYear: includeYear)
+    let context = UsageDateContext(
+      now: now, includesYear: includeYear, includeAutomated: effectiveIncludeAutomated)
     let retainedAgents = !includeYear && lastYearRefresh != nil ? discoveredAgents : []
     if includeYear { lastYearRefresh = nil }
-    let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
-      for: context.timeZone.identifier)
+    let invalidateCurrentDay =
+      scopeChanged
+      || timezoneRefreshState.shouldInvalidateCurrentDay(
+        for: context.timeZone.identifier)
     if invalidateCurrentDay {
       clearPublishedUsage()
     }
@@ -222,6 +247,11 @@ final class AppModel: ObservableObject {
             return
           }
 
+          guard context.includeAutomated == self.effectiveIncludeAutomated else {
+            self.isRefreshing = false
+            self.refreshNow()
+            return
+          }
           self.discoveredAgents = result.discoveredAgents
           self.agentPreferences.saveDiscoveredAgents(self.discoveredAgents)
           if let machineLabels = result.machineLabels {
@@ -232,6 +262,8 @@ final class AppModel: ObservableObject {
           if result.importErrors.isEmpty {
             self.statusMessage = nil
             if self.sourceConfigurationGeneration == sourceGeneration {
+              self.defaults.set(
+                context.includeAutomated, forKey: DefaultsKey.lastUsageIncludeAutomated)
               self.lastUpdated = context.now
               if context.includesYear { self.lastYearRefresh = context }
             }
@@ -257,11 +289,11 @@ final class AppModel: ObservableObject {
             self.timezoneRefreshState.markTimezoneChange()
           }
           self.statusMessage = error.localizedDescription
-          if contextStillCurrent {
+          if contextStillCurrent && !self.usageScopeChanged {
             self.reloadFromStoreIfTimezoneReady()
           }
           self.isRefreshing = false
-          if !contextStillCurrent
+          if context.includeAutomated != self.effectiveIncludeAutomated || !contextStillCurrent
             || (!context.includesYear && self.needsYearRefresh(context: UsageDateContext()))
           {
             self.refreshNow()
@@ -431,6 +463,7 @@ final class AppModel: ObservableObject {
   }
 
   private func reloadFromStoreIfTimezoneReady() {
+    guard !usageScopeChanged else { return }
     let context = UsageDateContext()
     guard !timezoneRefreshState.shouldDeferStoreReload(for: context.timeZone.identifier) else {
       return
@@ -587,6 +620,8 @@ final class AppModel: ObservableObject {
   private enum DefaultsKey {
     static let welcomeKey = "hasSeenWelcome"
     static let refreshMinutes = "refreshMinutes"
+    static let includeAutomatedSessions = "includeAutomatedSessions"
+    static let lastUsageIncludeAutomated = "lastUsageIncludeAutomated"
     static let refreshInterval = "refreshInterval"
     static let agentsviewPath = "agentsviewPath"
     static let agentsviewServerURL = "agentsviewServerURL"
