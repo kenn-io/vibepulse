@@ -148,20 +148,25 @@ final class AppModel: ObservableObject {
       loginItemMessage = "Enable VibePulse in System Settings > Login Items."
     }
 
-    let stores: (UsageStore, UsageStore)
-    do {
-      stores = (
-        try suppliedStore ?? UsageStore.defaultStore(),
-        try suppliedNonAutomatedStore
-          ?? (suppliedStore != nil
-            ? UsageStore(path: ":memory:") : UsageStore.defaultStore(includeAutomated: false))
-      )
-    } catch {
-      stores = (try! UsageStore(path: ":memory:"), try! UsageStore(path: ":memory:"))
+    // Each database falls back alone, so one unreadable file keeps the other's history.
+    var databaseUnavailable = false
+    func openStore(_ open: () throws -> UsageStore) -> UsageStore {
+      do {
+        return try open()
+      } catch {
+        databaseUnavailable = true
+        return try! UsageStore(path: ":memory:")
+      }
+    }
+    combinedStore = openStore { try suppliedStore ?? UsageStore.defaultStore() }
+    nonAutomatedStore = openStore {
+      try suppliedNonAutomatedStore
+        ?? (suppliedStore != nil
+          ? UsageStore(path: ":memory:") : UsageStore.defaultStore(includeAutomated: false))
+    }
+    if databaseUnavailable {
       statusMessage = "Database unavailable. Running without persistence."
     }
-    combinedStore = stores.0
-    nonAutomatedStore = stores.1
     refreshService = UsageRefreshService(fetcher: fetcher, store: combinedStore)
     nonAutomatedRefreshService = UsageRefreshService(fetcher: fetcher, store: nonAutomatedStore)
     timeZoneObserver = NotificationCenter.default.addObserver(
