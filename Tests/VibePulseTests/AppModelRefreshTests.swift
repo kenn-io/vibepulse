@@ -263,6 +263,143 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
+  func testRefreshKeepsItsServerWhenSettingsChangeMidRefresh() async throws {
+    let defaults = try makeDefaults(serverURL: "https://example.com", includeAutomated: false)
+    let combined = try UsageStore(path: ":memory:")
+    let excluded = try UsageStore(path: ":memory:")
+    let blocked = expectation(description: "combined report blocked")
+    let resume = DispatchSemaphore(value: 0)
+    defer { resume.signal() }
+    let fetcher = ScopedUsageFetcher()
+    fetcher.beforeCombinedReport = {
+      blocked.fulfill()
+      _ = resume.wait(timeout: .now() + 3)
+    }
+    let model = AppModel(
+      defaults: defaults, store: combined, nonAutomatedStore: excluded, fetcher: fetcher)
+
+    await fulfillment(of: [blocked], timeout: 3)
+    model.agentsviewServerURL = ""
+    resume.signal()
+    await finishRefresh(model)
+
+    XCTAssertEqual(Set(fetcher.serverURLs), ["https://example.com"])
+    let today = UsageDateContext().todayKey
+    XCTAssertEqual(excluded.dailyTotal(for: today, tool: .codex), 10)
+    XCTAssertEqual(combined.dailyTotal(for: today, tool: .codex), 100)
+  }
+
+  @MainActor
+  func testAgentMissingFromFilteredDiscoveryLosesRecentTotalsOnly() async throws {
+    let defaults = try makeDefaults(serverURL: "https://example.com", includeAutomated: false)
+    let combined = try UsageStore(path: ":memory:")
+    let excluded = try UsageStore(path: ":memory:")
+    let bot = UsageAgent("review-bot")
+    let context = UsageDateContext()
+    let olderKey = DateHelper.dateKey(
+      for: context.calendar.date(byAdding: .day, value: -60, to: context.startOfToday)!,
+      in: context.timeZone)
+    try excluded.upsertDailyTotals(
+      tool: bot, totals: [DailyTotal(dateKey: olderKey, cost: 3)],
+      dateContext: UsageDateContext(includesYear: true))
+    let fetcher = ScopedUsageFetcher(agents: [.codex, bot])
+    let model = AppModel(
+      defaults: defaults, store: combined, nonAutomatedStore: excluded, fetcher: fetcher)
+    await finishRefresh(model)
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(15))
+
+    fetcher.setAgents([.codex], includeAutomated: false)
+    model.refreshNow(refreshHistory: false)
+    await finishRefresh(model)
+
+    XCTAssertNil(model.statusMessage)
+    XCTAssertEqual(model.discoveredAgents, [.codex, bot].sorted())
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+    XCTAssertNil(excluded.dailyTotal(for: context.todayKey, tool: bot))
+    XCTAssertTrue(
+      excluded.fetchSamples(tool: bot, from: context.startOfToday, to: Date()).isEmpty)
+    XCTAssertEqual(excluded.dailyTotal(for: olderKey, tool: bot), 3)
+    model.includeAutomatedSessions = true
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(150))
+  }
+
+  @MainActor
+  func testTimezoneChangeInCLIModeInvalidatesBothCaches() async throws {
+    let currentZone = UsageDateContext().timeZone.identifier
+    let defaults = try makeDefaults(serverURL: "", includeAutomated: false)
+    defaults.set(currentZone == "UTC" ? "Asia/Tokyo" : "UTC", forKey: "lastUsageTimeZone")
+    let combined = try UsageStore(path: ":memory:")
+    let excluded = try UsageStore(path: ":memory:")
+    let context = UsageDateContext()
+    for store in [combined, excluded] {
+      try store.upsertDailyTotals(
+        tool: .codex, totals: [DailyTotal(dateKey: context.todayKey, cost: 999)],
+        dateContext: context)
+      try store.insertSample(
+        tool: .codex, totalCost: 999, recordedAt: context.now, dateContext: context)
+    }
+    let model = AppModel(
+      defaults: defaults, store: combined, nonAutomatedStore: excluded,
+      fetcher: ScopedUsageFetcher())
+    await finishRefresh(model)
+
+    XCTAssertEqual(combined.dailyTotal(for: context.todayKey, tool: .codex), 100)
+    XCTAssertNil(excluded.dailyTotal(for: context.todayKey, tool: .codex))
+    XCTAssertTrue(
+      excluded.fetchSamples(tool: .codex, from: context.startOfToday, to: Date()).isEmpty)
+
+    model.agentsviewServerURL = "https://example.com"
+    model.refreshNow()
+    await finishRefresh(model)
+    XCTAssertEqual(
+      excluded.fetchSamples(tool: .codex, from: context.startOfToday, to: Date())
+        .map(\.totalCost), [10])
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+  }
+
+  @MainActor
+  func testOneFailedReportStillPublishesTheOther() async throws {
+    for includeAutomated in [true, false] {
+      let defaults = try makeDefaults(
+        serverURL: "https://example.com", includeAutomated: includeAutomated)
+      let fetcher = ScopedUsageFetcher()
+      // Fail the report that is not displayed.
+      fetcher.setFailing(!includeAutomated)
+      let model = AppModel(
+        defaults: defaults, store: try UsageStore(path: ":memory:"),
+        nonAutomatedStore: try UsageStore(path: ":memory:"), fetcher: fetcher)
+      await finishRefresh(model)
+
+      XCTAssertEqual(model.discoveredAgents, [.codex])
+      XCTAssertEqual(
+        model.menuTotalText, Formatters.currencyString(includeAutomated ? 100 : 10))
+      XCTAssertNotNil(model.statusMessage)
+      XCTAssertNil(model.lastUpdated)
+
+      fetcher.setFailing(nil)
+      model.refreshIfNeeded()
+      await finishRefresh(model)
+      XCTAssertNil(model.statusMessage)
+      XCTAssertNotNil(model.lastUpdated)
+      model.includeAutomatedSessions.toggle()
+      XCTAssertEqual(
+        model.menuTotalText, Formatters.currencyString(includeAutomated ? 10 : 100))
+    }
+  }
+
+  @MainActor
+  private func makeDefaults(serverURL: String, includeAutomated: Bool) throws -> UserDefaults {
+    let suite = "VibePulseTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(true, forKey: "hasSeenWelcome")
+    defaults.set("manual", forKey: "maintenanceMode")
+    defaults.set(serverURL, forKey: "agentsviewServerURL")
+    defaults.set(includeAutomated, forKey: "includeAutomatedSessions")
+    return defaults
+  }
+
+  @MainActor
   private func makeModel() throws -> (AppModel, CountingUsageFetcher, UsageStore) {
     let suite = "VibePulseTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -299,7 +436,7 @@ private final class CountingUsageFetcher: UsageFetching, @unchecked Sendable {
 
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] { [.codex] }
 
-  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? { nil }
 
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]
@@ -317,7 +454,7 @@ private final class CountingUsageFetcher: UsageFetching, @unchecked Sendable {
 
 private struct AutomatedUsageFetcher: UsageFetching {
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] { [.codex] }
-  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? { nil }
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]
   {
@@ -338,7 +475,7 @@ private final class BlockingScopeFetcher: UsageFetching, @unchecked Sendable {
 
   init(blocked: XCTestExpectation) { self.blocked = blocked }
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] { [.codex] }
-  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? { nil }
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]
   {
@@ -359,5 +496,58 @@ private final class BlockingScopeFetcher: UsageFetching, @unchecked Sendable {
         modelBreakdowns: [DailyModelBreakdown(modelName: "test-model", cost: cost)],
         machineBreakdowns: [DailyMachineBreakdown(machineName: "test-machine", cost: cost)])
     ]
+  }
+}
+
+// Reports $10 per agent without automation and $100 with it; a second agent reports half that.
+private final class ScopedUsageFetcher: UsageFetching, @unchecked Sendable {
+  private let lock = NSLock()
+  private var agentsByScope: [Bool: [UsageAgent]]
+  private var failingScope: Bool?
+  private var requestedServerURLs: [String] = []
+  // Runs once, before the first report that includes automation.
+  var beforeCombinedReport: (() -> Void)?
+
+  init(agents: [UsageAgent] = [.codex]) {
+    agentsByScope = [true: agents, false: agents]
+  }
+
+  var serverURLs: [String] { lock.withLock { requestedServerURLs } }
+
+  func setAgents(_ agents: [UsageAgent], includeAutomated: Bool) {
+    lock.withLock { agentsByScope[includeAutomated] = agents }
+  }
+
+  func setFailing(_ includeAutomated: Bool?) {
+    lock.withLock { failingScope = includeAutomated }
+  }
+
+  func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
+    try lock.withLock {
+      requestedServerURLs.append(context.serverURL)
+      if failingScope == context.includeAutomated {
+        throw UsageFetcher.FetchError.invalidOutput
+      }
+      return agentsByScope[context.includeAutomated] ?? []
+    }
+  }
+
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? {
+    lock.withLock { requestedServerURLs.append(context.serverURL) }
+    return nil
+  }
+
+  func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
+    -> [DailyTotal]
+  {
+    let pause: (() -> Void)? = lock.withLock {
+      requestedServerURLs.append(context.serverURL)
+      guard context.includeAutomated else { return nil }
+      defer { beforeCombinedReport = nil }
+      return beforeCombinedReport
+    }
+    pause?()
+    let cost = (tool == .codex ? 10.0 : 5.0) * (context.includeAutomated ? 10 : 1)
+    return [DailyTotal(dateKey: context.todayKey, cost: cost)]
   }
 }

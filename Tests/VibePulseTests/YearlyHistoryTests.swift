@@ -315,7 +315,7 @@ private final class HistoryUsageFetcher: UsageFetching, @unchecked Sendable {
     }
   }
 
-  func fetchMachineLabels() throws -> MachineLabels? { nil }
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? { nil }
 
   func fetchDailyTotals(for tool: UsageAgent, using context: UsageDateContext) throws
     -> [DailyTotal]

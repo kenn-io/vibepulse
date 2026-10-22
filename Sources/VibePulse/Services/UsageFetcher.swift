@@ -7,7 +7,7 @@ protocol UsageFetching: Sendable {
     for tool: UsageAgent,
     using context: UsageDateContext
   ) throws -> [DailyTotal]
-  func fetchMachineLabels() throws -> MachineLabels?
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels?
 }
 
 final class UsageFetcher: UsageFetching, @unchecked Sendable {
@@ -17,6 +17,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     case agentsviewNotFound(String?)
     case invalidServerURL(String)
     case unsupportedTimezone
+    case automationFilterUnsupported
   }
 
   private let commandRunner: (([String]) throws -> Data)?
@@ -33,7 +34,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
         agent: nil,
         context: context)
       let agents = try Self.parseDiscoveredAgents(data: data)
-      if configuredServerURL.isEmpty {
+      if context.serverURL.isEmpty {
         cliMachineLabels = MachineLabels(
           serverURL: "", labels: (try? Self.parseMachineLabels(data: data)) ?? [:])
       }
@@ -71,8 +72,8 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   }
 
   // CLI labels arrive with discovery; server labels include machines outside the usage window.
-  func fetchMachineLabels() throws -> MachineLabels? {
-    let serverURL = Self.normalizedServerURL(configuredServerURL)
+  func fetchMachineLabels(using context: UsageDateContext) throws -> MachineLabels? {
+    let serverURL = Self.normalizedServerURL(context.serverURL)
     guard !serverURL.isEmpty else { return cliMachineLabels }
 
     let data = try Data(contentsOf: Self.makeMachinesURL(configuredURL: serverURL))
@@ -81,18 +82,15 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       labels: try Self.parseMachineLabels(data: data))
   }
 
-  private var configuredServerURL: String {
-    UserDefaults.standard.string(forKey: "agentsviewServerURL")?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-  }
-
   private func fetchUsageData(
     command: [String],
     agent: String?,
     context: UsageDateContext
   ) throws -> Data {
-    let configuredURL = configuredServerURL
+    let configuredURL = context.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !configuredURL.isEmpty else {
+      // The CLI always includes automation, so it cannot answer a filtered request.
+      guard context.includeAutomated else { throw FetchError.automationFilterUnsupported }
       return try executeAgentsviewCommand(command)
     }
 
@@ -156,6 +154,8 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
         throw FetchError.agentsviewNotFound(path)
       } catch FetchError.unsupportedTimezone {
         throw FetchError.unsupportedTimezone
+      } catch FetchError.automationFilterUnsupported {
+        throw FetchError.automationFilterUnsupported
       } catch {
         if attempt == maxAttempts {
           throw error
@@ -513,6 +513,8 @@ extension UsageFetcher.FetchError: LocalizedError {
       return
         "A current agentsview release with --timezone support is required. "
         + "Update agentsview and try again."
+    case .automationFilterUnsupported:
+      return "The local agentsview CLI cannot exclude automated sessions."
     }
   }
 }

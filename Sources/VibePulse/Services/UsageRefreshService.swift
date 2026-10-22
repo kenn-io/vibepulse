@@ -17,23 +17,17 @@ final class UsageRefreshService: @unchecked Sendable {
 
   func refresh(
     context: UsageDateContext,
-    retainedAgents: [UsageAgent] = [],
-    invalidateCurrentDay: Bool = false
+    retainedAgents: [UsageAgent] = []
   ) throws -> UsageRefreshResult {
-    if invalidateCurrentDay {
-      try store.deleteCurrentDaySamples(using: context)
-      try store.deleteRefreshWindowRollups(using: context)
-    }
-
     let agents = try fetcher.discoverAgents(using: context).sorted()
-    // Year discovery must also reconcile agents that have already left the active list.
-    let cachedAgents = context.includesYear ? store.storedAgents() : retainedAgents
-    for agent in Set(cachedAgents).subtracting(agents) {
+    // Agents missing from discovery have no usage in the window, even if another
+    // scope's discovery still lists them.
+    for agent in Set(store.storedAgents()).union(retainedAgents).subtracting(agents) {
       try store.replaceDailyTotals(tool: agent, totals: [], dateContext: context)
       try store.deleteCurrentDaySamples(for: agent, using: context)
     }
     // Labels are display-only, so a failed request must not block usage.
-    let machineLabels = try? fetcher.fetchMachineLabels()
+    let machineLabels = try? fetcher.fetchMachineLabels(using: context)
     let reports = agents.map { DailyTotalsFetch(fetcher: fetcher, agent: $0, context: context) }
     let queue = OperationQueue()
     queue.maxConcurrentOperationCount = 2

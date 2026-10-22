@@ -91,6 +91,31 @@ final class UsageFetcherTests: XCTestCase {
     }
   }
 
+  func testCLIRefusesRequestsThatExcludeAutomation() throws {
+    let lock = NSLock()
+    var commands: [[String]] = []
+    let fetcher = UsageFetcher(commandRunner: { arguments in
+      lock.withLock { commands.append(arguments) }
+      throw UsageFetcher.FetchError.invalidOutput
+    })
+    let filtered = UsageDateContext(includeAutomated: false)
+
+    for request in [
+      { _ = try fetcher.discoverAgents(using: filtered) },
+      { _ = try fetcher.fetchDailyTotals(for: .codex, using: filtered) },
+    ] {
+      XCTAssertThrowsError(try request()) { error in
+        guard case UsageFetcher.FetchError.automationFilterUnsupported = error else {
+          return XCTFail("unexpected error: \(error)")
+        }
+      }
+    }
+    XCTAssertTrue(lock.withLock { commands.isEmpty })
+
+    XCTAssertThrowsError(try fetcher.discoverAgents(using: UsageDateContext()))
+    XCTAssertFalse(lock.withLock { commands.isEmpty })
+  }
+
   func testMachinesURLUsesConfiguredServerBase() throws {
     let url = try UsageFetcher.makeMachinesURL(configuredURL: "http://127.0.0.1:18080/")
 
