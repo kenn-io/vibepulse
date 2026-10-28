@@ -6,7 +6,7 @@ import XCTest
 
 final class AppModelRefreshTests: XCTestCase {
   @MainActor
-  func testMenuReusesFreshUsageAndManualRefreshStillFetches() async throws {
+  func testConditionalRefreshReusesFreshUsageAndManualRefreshStillFetches() async throws {
     let (model, fetcher, store) = try makeModel()
     await finishRefresh(model)
     XCTAssertEqual(fetcher.requestCount, 1)
@@ -24,7 +24,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testMenuRefreshesAtIntervalBoundaryAndAfterClockMovesBackwards() async throws {
+  func testConditionalRefreshRunsAtIntervalBoundaryAndAfterClockMovesBackwards() async throws {
     let (model, fetcher, _) = try makeModel()
     await finishRefresh(model)
     let lastUpdated = try XCTUnwrap(
@@ -45,9 +45,10 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testOpeningMenuUsesFreshUsageWithoutAnotherRequest() async throws {
-    let (model, fetcher, _) = try makeModel()
+  func testOpeningMenuRefreshesUsageBeforeIntervalExpires() async throws {
+    let (model, fetcher, store) = try makeModel()
     await finishRefresh(model)
+    XCTAssertEqual(model.toolTotals.first?.totalCost, 1)
     let view = NSHostingView(
       rootView: MenuContentView()
         .environmentObject(model)
@@ -55,7 +56,9 @@ final class AppModelRefreshTests: XCTestCase {
     view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
     view.layoutSubtreeIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.requestCount, 1)
+    XCTAssertEqual(fetcher.requestCount, 2)
+    XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 2)
+    XCTAssertEqual(model.toolTotals.first?.totalCost, 2)
   }
 
   @MainActor
@@ -98,7 +101,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testMenuRefreshesWhenSourceChanges() async throws {
+  func testConditionalRefreshRunsWhenSourceChanges() async throws {
     let (model, fetcher, _) = try makeModel()
     await finishRefresh(model)
     model.agentsviewServerURL = "https://example.com"
@@ -113,7 +116,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testMenuRefreshesOnNewDayBeforeIntervalExpires() async throws {
+  func testConditionalRefreshRunsOnNewDayBeforeIntervalExpires() async throws {
     let (model, fetcher, _) = try makeModel()
     await finishRefresh(model)
     let midnight = try XCTUnwrap(
@@ -126,7 +129,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testMenuRefreshesWhenPreviousRefreshFinishesAfterMidnight() async throws {
+  func testConditionalRefreshRunsWhenPreviousRefreshFinishesAfterMidnight() async throws {
     let (model, fetcher, store) = try makeModel()
     await finishRefresh(model)
     model.refreshInterval = .oneDay
@@ -149,7 +152,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testMenuRetriesAfterFailedManualRefresh() async throws {
+  func testConditionalRefreshRetriesAfterFailedManualRefresh() async throws {
     let (model, fetcher, store) = try makeModel()
     await finishRefresh(model)
     fetcher.failNextRequest()

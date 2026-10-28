@@ -97,6 +97,30 @@ final class YearlyHistoryTests: XCTestCase {
   }
 
   @MainActor
+  func testOpeningYearMenuRefreshesNewUsageWithoutReloadingOlderHistory() async throws {
+    let (model, fetcher) = try makeModel()
+    await finishRefresh(model)
+    model.chartMode = .oneYear
+    await finishRefresh(model)
+    XCTAssertEqual(model.toolTotals.reduce(0) { $0 + $1.totalCost }, 2)
+    XCTAssertEqual(fetcher.yearRequests, 2)
+
+    fetcher.recordRecentUsage(cost: 5)
+    let view = NSHostingView(
+      rootView: MenuContentView()
+        .environmentObject(model).environmentObject(UpdaterController()))
+    view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
+    view.layoutSubtreeIfNeeded()
+    await finishRefresh(model)
+
+    XCTAssertEqual(model.toolTotals.reduce(0) { $0 + $1.totalCost }, 5)
+    XCTAssertEqual(model.monthlySeries.reduce(0) { $0 + $1.cost }, 18)
+    XCTAssertEqual(model.modelMonthlySeries.reduce(0) { $0 + $1.cost }, 18)
+    XCTAssertEqual(model.machineMonthlySeries.reduce(0) { $0 + $1.cost }, 18)
+    XCTAssertEqual(fetcher.yearRequests, 2)
+  }
+
+  @MainActor
   func testRecentRefreshClearsDisappearedUsageWhilePreservingOlderHistory() async throws {
     let (model, fetcher) = try makeModel()
     await finishRefresh(model)
