@@ -54,28 +54,45 @@ final class AppModelRefreshTests: XCTestCase {
         .environmentObject(model)
         .environmentObject(UpdaterController()))
     view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
+    let window = showMenuWindow(containing: view)
+    defer { window.close() }
     view.layoutSubtreeIfNeeded()
+    await waitForMenuTotal(2, model: model)
     await finishRefresh(model)
     XCTAssertEqual(fetcher.requestCount, 2)
     XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 2)
     XCTAssertEqual(model.toolTotals.first?.totalCost, 2)
+
+    let unrelatedWindow = NSWindow(
+      contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+    unrelatedWindow.becomeKey()
+    XCTAssertFalse(model.isRefreshing)
+    XCTAssertEqual(fetcher.requestCount, 2)
+
+    window.orderOut(nil)
+    window.makeKeyAndOrderFront(nil)
+    if !window.isKeyWindow { window.becomeKey() }
+    await waitForMenuTotal(3, model: model)
+    await finishRefresh(model)
+    XCTAssertEqual(fetcher.requestCount, 3)
+    XCTAssertEqual(model.toolTotals.first?.totalCost, 3)
   }
 
   @MainActor
-  func testSourceChangeDuringRefreshDoesNotMarkNewSourceFresh() async throws {
+  func testSourceChangeBeforeStartupRequestUsesLatestSource() async throws {
     let (model, fetcher, _) = try makeModel()
     model.agentsviewServerURL = "https://example.com"
     await finishRefresh(model)
-    XCTAssertNil(model.lastUpdated)
+    XCTAssertNotNil(model.lastUpdated)
+    XCTAssertEqual(fetcher.requestCount, 2)
 
     model.refreshIfNeeded()
     await finishRefresh(model)
-    XCTAssertEqual(fetcher.requestCount, 3)
-    XCTAssertNotNil(model.lastUpdated)
+    XCTAssertEqual(fetcher.requestCount, 2)
   }
 
   @MainActor
-  func testSourceChangedAndRestoredDuringRefreshStillRequiresAnotherRequest() async throws {
+  func testSourceChangedAndRestoredBeforeStartupCoalescesRequests() async throws {
     for (setting, otherSource) in [
       (\AppModel.agentsviewServerURL, "https://example.com"),
       (\AppModel.agentsviewPath, "/example/agentsview"),
@@ -83,20 +100,20 @@ final class AppModelRefreshTests: XCTestCase {
       let (model, fetcher, store) = try makeModel()
       let originalSource = model[keyPath: setting]
 
-      // The main actor cannot complete the initial refresh until these changes finish.
+      // These changes occur before the queued startup request begins.
       model[keyPath: setting] = otherSource
       model[keyPath: setting] = originalSource
       await finishRefresh(model)
-      XCTAssertNil(model.lastUpdated)
+      XCTAssertNotNil(model.lastUpdated)
 
       model.refreshIfNeeded()
       await finishRefresh(model)
-      XCTAssertEqual(fetcher.requestCount, 2)
-      XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 2)
+      XCTAssertEqual(fetcher.requestCount, 1)
+      XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 1)
 
       model.refreshIfNeeded()
       await finishRefresh(model)
-      XCTAssertEqual(fetcher.requestCount, 2)
+      XCTAssertEqual(fetcher.requestCount, 1)
     }
   }
 
@@ -232,7 +249,7 @@ final class AppModelRefreshTests: XCTestCase {
     model.includeAutomatedSessions = true
     XCTAssertEqual(model.menuTotalText, Formatters.currencyString(100))
     model.includeAutomatedSessions = false
-    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
+    XCTAssertEqual(model.menuTotalText, Formatters.currencyString(20))
     fetcher.resume.signal()
     await finishRefresh(model)
 
@@ -266,7 +283,7 @@ final class AppModelRefreshTests: XCTestCase {
   }
 
   @MainActor
-  func testRefreshKeepsItsServerWhenSettingsChangeMidRefresh() async throws {
+  func testSwitchingFromServerToCLIRefreshesAndClearsInactiveHistory() async throws {
     let defaults = try makeDefaults(serverURL: "https://example.com", includeAutomated: false)
     let combined = try UsageStore(path: ":memory:")
     let excluded = try UsageStore(path: ":memory:")
@@ -286,10 +303,11 @@ final class AppModelRefreshTests: XCTestCase {
     resume.signal()
     await finishRefresh(model)
 
-    XCTAssertEqual(Set(fetcher.serverURLs), ["https://example.com"])
+    XCTAssertEqual(Set(fetcher.serverURLs), ["https://example.com", ""])
     let today = UsageDateContext().todayKey
-    XCTAssertEqual(excluded.dailyTotal(for: today, tool: .codex), 10)
+    XCTAssertNil(excluded.dailyTotal(for: today, tool: .codex))
     XCTAssertEqual(combined.dailyTotal(for: today, tool: .codex), 100)
+    XCTAssertNotNil(model.lastUpdated)
   }
 
   @MainActor
