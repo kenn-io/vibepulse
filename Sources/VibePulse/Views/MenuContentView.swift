@@ -45,10 +45,7 @@ struct MenuContentView: View {
     .padding(12)
     .frame(width: 360)
     .background(Color(nsColor: .windowBackgroundColor))
-    .onAppear {
-      disableWindowResizing()
-      model.refreshNow(refreshHistory: false)
-    }
+    .background(MenuWindowObserver { model.refreshNow(refreshHistory: false) })
   }
 
   private var selectorControls: some View {
@@ -192,12 +189,6 @@ struct MenuContentView: View {
     .font(.caption)
   }
 
-  private func disableWindowResizing() {
-    if let window = NSApp.keyWindow {
-      window.styleMask.remove(.resizable)
-    }
-  }
-
   private var combinedTotalText: String {
     switch chartMode {
     case .today:
@@ -321,6 +312,44 @@ private struct ToolTotalLegendItem: View {
       }
       .font(.caption)
       .foregroundColor(.secondary)
+    }
+  }
+}
+
+// MenuBarExtra reuses its window, so SwiftUI onAppear does not run on every open.
+private struct MenuWindowObserver: NSViewRepresentable {
+  var onOpen: () -> Void
+
+  func makeNSView(context: Context) -> WindowView {
+    let view = WindowView()
+    view.onOpen = onOpen
+    return view
+  }
+
+  func updateNSView(_ view: WindowView, context: Context) {
+    view.onOpen = onOpen
+  }
+
+  final class WindowView: NSView {
+    var onOpen: (() -> Void)?
+    private var observer: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+      observer = nil
+      guard let window else { return }
+      window.styleMask.remove(.resizable)
+      observer = NotificationCenter.default.addObserver(
+        forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+      ) { [weak self] _ in
+        self?.onOpen?()
+      }
+      if window.isKeyWindow { onOpen?() }
+    }
+
+    deinit {
+      if let observer { NotificationCenter.default.removeObserver(observer) }
     }
   }
 }

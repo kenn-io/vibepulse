@@ -22,6 +22,30 @@ final class UsageFetcherTests: XCTestCase {
     XCTAssertEqual(resolved, shim.path)
   }
 
+  func testCLIUsesExecutableCapturedForEachRefresh() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var contexts: [UsageDateContext] = []
+    for cost in [7, 9] {
+      let executable = directory.appendingPathComponent("agentsview-\(cost)")
+      let script = """
+        #!/bin/sh
+        printf '%s\\n' '{"daily":[{"date":"2026-07-17","totalCost":\(cost),"agentBreakdowns":[{"agent":"codex","cost":\(cost)}]}]}'
+        """
+      try Data(script.utf8).write(to: executable)
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755], ofItemAtPath: executable.path)
+      contexts.append(UsageDateContext(agentsviewPath: executable.path))
+    }
+    let fetcher = UsageFetcher()
+    XCTAssertEqual(try fetcher.discoverAgents(using: contexts[0]), [.codex])
+    XCTAssertEqual(try fetcher.discoverAgents(using: contexts[1]), [.codex])
+    // A later refresh must not change the executable used by an earlier one.
+    XCTAssertEqual(try fetcher.fetchDailyTotals(for: .codex, using: contexts[0]).map(\.cost), [7])
+    XCTAssertEqual(try fetcher.fetchDailyTotals(for: .codex, using: contexts[1]).map(\.cost), [9])
+  }
+
   func testServerURLConstrainsDiscoveryAndAgentRequestsToThirtyDays() throws {
     let now = try XCTUnwrap(
       ISO8601DateFormatter().date(from: "2026-08-10T12:00:00Z"))

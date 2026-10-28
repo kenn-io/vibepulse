@@ -49,9 +49,7 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewPath, forKey: DefaultsKey.agentsviewPath
       )
-      sourceConfigurationGeneration += 1
-      lastYearRefresh = nil
-      lastUpdated = nil
+      if agentsviewPath != oldValue { sourceConfigurationChanged() }
     }
   }
   @Published var agentsviewServerURL: String {
@@ -59,9 +57,7 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewServerURL, forKey: DefaultsKey.agentsviewServerURL
       )
-      sourceConfigurationGeneration += 1
-      lastYearRefresh = nil
-      lastUpdated = nil
+      if agentsviewServerURL != oldValue { sourceConfigurationChanged() }
     }
   }
   @Published var includeAutomatedSessions: Bool {
@@ -103,6 +99,10 @@ final class AppModel: ObservableObject {
   private let nonAutomatedRefreshService: UsageRefreshService
   private var sourceConfigurationGeneration = 0
   private var lastYearRefresh: UsageDateContext?
+  private var pendingRefresh: (now: Date, refreshHistory: Bool)?
+  private var sourceNeedsInvalidation = false
+  private let fetcher: UsageFetching
+  private var isFetchingMachineLabels = false
 
   init(
     defaults: UserDefaults = .standard,
@@ -111,6 +111,8 @@ final class AppModel: ObservableObject {
     fetcher: UsageFetching = UsageFetcher()
   ) {
     self.defaults = defaults
+    self.fetcher = fetcher
+    sourceNeedsInvalidation = defaults.bool(forKey: DefaultsKey.sourceNeedsInvalidation)
     timezoneRefreshState = UsageRefreshTimezoneState(
       lastSuccessfulTimeZone: defaults.string(forKey: DefaultsKey.lastUsageTimeZone),
       lastInvalidatedTimeZone: defaults.string(forKey: DefaultsKey.lastUsageInvalidatedTimeZone))
@@ -180,8 +182,9 @@ final class AppModel: ObservableObject {
     }
 
     let initialContext = UsageDateContext()
-    if !timezoneRefreshState.shouldInvalidateCurrentDay(
-      for: initialContext.timeZone.identifier)
+    if !sourceNeedsInvalidation,
+      !timezoneRefreshState.shouldInvalidateCurrentDay(
+        for: initialContext.timeZone.identifier)
     {
       reloadFromStore(context: initialContext)
     }
@@ -222,123 +225,165 @@ final class AppModel: ObservableObject {
   }
 
   func refreshNow(now: Date = Date(), refreshHistory: Bool = true) {
+    // Keep the newest request and any explicit request for history. Repeated menu
+    // opens while busy need one follow-up, not one request per open or no request.
+    pendingRefresh = (now, refreshHistory || (pendingRefresh?.refreshHistory ?? false))
     guard !isRefreshing else { return }
-
     isRefreshing = true
-    statusMessage = nil
+    Task {
+      while let request = pendingRefresh {
+        pendingRefresh = nil
+        await refreshUsage(now: request.now, refreshHistory: request.refreshHistory)
+      }
+      isRefreshing = false
+    }
+  }
 
+  private func sourceConfigurationChanged() {
+    sourceConfigurationGeneration += 1
+    sourceNeedsInvalidation = true
+    defaults.set(true, forKey: DefaultsKey.sourceNeedsInvalidation)
+    clearPublishedUsage()
+    if isRefreshing { refreshNow(refreshHistory: false) }
+  }
+
+  private func refreshUsage(now: Date, refreshHistory: Bool) async {
+    statusMessage = nil
     let sourceGeneration = sourceConfigurationGeneration
     let includeYear =
       (refreshHistory && chartMode == .oneYear)
       || needsYearRefresh(context: UsageDateContext(now: now))
-    let serverURL = agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
     let context = UsageDateContext(
-      now: now, includesYear: includeYear, serverURL: serverURL)
+      now: now, includesYear: includeYear,
+      serverURL: agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines),
+      agentsviewPath: agentsviewPath)
     let retainedAgents = !includeYear && lastYearRefresh != nil ? discoveredAgents : []
     let previousAgents = discoveredAgents
     if includeYear { lastYearRefresh = nil }
     let invalidateCurrentDay = timezoneRefreshState.shouldInvalidateCurrentDay(
       for: context.timeZone.identifier)
-    if invalidateCurrentDay {
-      clearPublishedUsage()
-    }
+    if invalidateCurrentDay { clearPublishedUsage() }
 
-    DispatchQueue.global(qos: .background).async {
-      [combinedStore, nonAutomatedStore, refreshService, nonAutomatedRefreshService] in
-      do {
-        // Both caches share one timezone marker, so both leave the old timezone together.
-        if invalidateCurrentDay {
+    if sourceNeedsInvalidation || invalidateCurrentDay {
+      // A source change invalidates the entire displayed history, including the
+      // inactive scope. Wait for obsolete writes before clearing either cache.
+      let invalidationContext = UsageDateContext(
+        now: now, timeZone: context.timeZone,
+        includesYear: sourceNeedsInvalidation || context.includesYear)
+      let invalidation = await Task.detached(priority: .userInitiated) {
+        [combinedStore, nonAutomatedStore] in
+        Result {
           for store in [combinedStore, nonAutomatedStore] {
-            try store.deleteCurrentDaySamples(using: context)
-            try store.deleteRefreshWindowRollups(using: context)
+            try store.deleteCurrentDaySamples(using: invalidationContext)
+            try store.deleteRefreshWindowRollups(using: invalidationContext)
           }
         }
-        let combined = Result {
-          try refreshService.refresh(context: context, retainedAgents: retainedAgents)
-        }
-        // Only a server can exclude automation; the CLI never fills the non-automated cache.
-        let nonAutomated =
-          serverURL.isEmpty
-          ? nil
-          : Result {
-            try nonAutomatedRefreshService.refresh(
-              context: UsageDateContext(
-                now: context.now, timeZone: context.timeZone,
-                includesYear: context.includesYear, includeAutomated: false,
-                serverURL: serverURL))
-          }
-        let reports = [combined, nonAutomated].compactMap { $0 }
-        let succeeded = reports.compactMap { try? $0.get() }
-        if succeeded.isEmpty { _ = try combined.get() }
-        // Publish whichever report succeeded. The other's error keeps the refresh due for retry.
-        var errors = succeeded.flatMap(\.importErrors)
-        if case .failure(let error) = combined {
-          errors.append(error.localizedDescription)
-        }
-        if case .failure(let error)? = nonAutomated {
-          errors.append("Without automated sessions: \(error.localizedDescription)")
-        }
-        let keptAgents = succeeded.count < reports.count ? previousAgents : []
-        let completedResult = UsageRefreshResult(
-          discoveredAgents: Array(Set(succeeded.flatMap(\.discoveredAgents) + keptAgents))
-            .sorted(),
-          importErrors: errors,
-          machineLabels: succeeded.lazy.compactMap(\.machineLabels).first)
-        DispatchQueue.main.async {
-          guard UsageDateContext().timeZone.identifier == context.timeZone.identifier else {
-            self.timezoneRefreshState.markTimezoneChange()
-            self.isRefreshing = false
-            self.refreshNow()
-            return
-          }
-
-          self.discoveredAgents = completedResult.discoveredAgents
-          self.agentPreferences.saveDiscoveredAgents(self.discoveredAgents)
-          if let machineLabels = completedResult.machineLabels {
-            self.machineLabelSnapshot = machineLabels
-            self.defaults.set(
-              try? JSONEncoder().encode(machineLabels), forKey: DefaultsKey.machineLabels)
-          }
-          if completedResult.importErrors.isEmpty {
-            self.statusMessage = nil
-            if self.sourceConfigurationGeneration == sourceGeneration {
-              self.lastUpdated = context.now
-              if context.includesYear { self.lastYearRefresh = context }
-            }
-          } else {
-            self.statusMessage = completedResult.importErrors.joined(separator: " | ")
-          }
-          self.timezoneRefreshState.completeRefresh(
-            for: context.timeZone.identifier,
-            invalidatedCurrentDay: invalidateCurrentDay,
-            hasImportErrors: !completedResult.importErrors.isEmpty)
-          self.persistTimezoneRefreshState()
-          self.reloadFromStore(context: UsageDateContext())
-          self.isRefreshing = false
-          if !context.includesYear && self.needsYearRefresh(context: UsageDateContext()) {
-            self.refreshIfNeeded()
-          }
-        }
+      }.value
+      guard refreshContextIsCurrent(context, sourceGeneration: sourceGeneration) else { return }
+      do {
+        try invalidation.get()
+        sourceNeedsInvalidation = false
+        defaults.set(false, forKey: DefaultsKey.sourceNeedsInvalidation)
       } catch {
-        DispatchQueue.main.async {
-          let contextStillCurrent =
-            UsageDateContext().timeZone.identifier == context.timeZone.identifier
-          if !contextStillCurrent {
-            self.timezoneRefreshState.markTimezoneChange()
-          }
-          self.statusMessage = error.localizedDescription
-          if contextStillCurrent {
-            self.reloadFromStoreIfTimezoneReady()
-          }
-          self.isRefreshing = false
-          if !contextStillCurrent
-            || (!context.includesYear && self.needsYearRefresh(context: UsageDateContext()))
-          {
-            self.refreshNow()
-          }
-        }
+        statusMessage = error.localizedDescription
+        return
       }
     }
+
+    refreshMachineLabels(context: context, sourceGeneration: sourceGeneration)
+    // Prioritize the visible history, then update the other cache without holding
+    // the first result off screen. CLI mode only supports the combined history.
+    let scopes =
+      context.serverURL.isEmpty ? [true] : [effectiveIncludeAutomated, !effectiveIncludeAutomated]
+    var succeeded: [UsageRefreshResult] = []
+    var errors: [String] = []
+    for includeAutomated in scopes {
+      let service = includeAutomated ? refreshService : nonAutomatedRefreshService
+      let scopeContext = UsageDateContext(
+        now: context.now, timeZone: context.timeZone, includesYear: context.includesYear,
+        includeAutomated: includeAutomated, serverURL: context.serverURL,
+        agentsviewPath: context.agentsviewPath)
+      let report = await Task.detached(priority: .userInitiated) {
+        Result { try service.refresh(context: scopeContext, retainedAgents: retainedAgents) }
+      }.value
+      guard refreshContextIsCurrent(context, sourceGeneration: sourceGeneration) else { return }
+      switch report {
+      case .success(let result):
+        succeeded.append(result)
+        errors += result.importErrors
+        if let labels = result.machineLabels { publishMachineLabels(labels) }
+        // Keep the other scope's agents until its discovery has completed.
+        let agents = Array(Set(succeeded.flatMap(\.discoveredAgents) + previousAgents)).sorted()
+        let agentsChanged = discoveredAgents != agents
+        discoveredAgents = agents
+        timezoneRefreshState.completeRefresh(
+          for: context.timeZone.identifier, invalidatedCurrentDay: invalidateCurrentDay,
+          hasImportErrors: !errors.isEmpty)
+        persistTimezoneRefreshState()
+        if includeAutomated == effectiveIncludeAutomated || agentsChanged {
+          reloadFromStore(context: UsageDateContext())
+        }
+      case .failure(let error):
+        errors.append(
+          (includeAutomated ? "" : "Without automated sessions: ") + error.localizedDescription)
+      }
+    }
+    if !succeeded.isEmpty {
+      let keptAgents = succeeded.count < scopes.count ? previousAgents : []
+      let agents = Array(Set(succeeded.flatMap(\.discoveredAgents) + keptAgents)).sorted()
+      let agentsChanged = discoveredAgents != agents
+      discoveredAgents = agents
+      agentPreferences.saveDiscoveredAgents(discoveredAgents)
+      if agentsChanged { reloadFromStore(context: UsageDateContext()) }
+    }
+    statusMessage = errors.isEmpty ? nil : errors.joined(separator: " | ")
+    if errors.isEmpty {
+      lastUpdated = context.now
+      if context.includesYear { lastYearRefresh = context }
+    }
+    if !context.includesYear && needsYearRefresh(context: UsageDateContext()) {
+      refreshNow(refreshHistory: false)
+    }
+  }
+
+  private func refreshContextIsCurrent(
+    _ context: UsageDateContext, sourceGeneration: Int
+  ) -> Bool {
+    let timezoneChanged = UsageDateContext().timeZone.identifier != context.timeZone.identifier
+    if timezoneChanged {
+      clearPublishedUsage()
+      timezoneRefreshState.markTimezoneChange()
+    }
+    guard !timezoneChanged, sourceGeneration == sourceConfigurationGeneration else {
+      if pendingRefresh == nil { refreshNow(refreshHistory: false) }
+      return false
+    }
+    return true
+  }
+
+  private func refreshMachineLabels(context: UsageDateContext, sourceGeneration: Int) {
+    guard !context.serverURL.isEmpty, !isFetchingMachineLabels else { return }
+    isFetchingMachineLabels = true
+    Task { [weak self, fetcher] in
+      let labels = await Task.detached(priority: .utility) {
+        try? fetcher.fetchMachineLabels(using: context)
+      }.value
+      guard let self else { return }
+      self.isFetchingMachineLabels = false
+      guard self.sourceConfigurationGeneration == sourceGeneration else {
+        self.refreshMachineLabels(
+          context: UsageDateContext(
+            serverURL: self.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+          sourceGeneration: self.sourceConfigurationGeneration)
+        return
+      }
+      if let labels { self.publishMachineLabels(labels) }
+    }
+  }
+
+  private func publishMachineLabels(_ labels: MachineLabels) {
+    machineLabelSnapshot = labels
+    defaults.set(try? JSONEncoder().encode(labels), forKey: DefaultsKey.machineLabels)
   }
 
   private func handleSystemTimeZoneChange() {
@@ -502,7 +547,9 @@ final class AppModel: ObservableObject {
 
   private func reloadFromStoreIfTimezoneReady() {
     let context = UsageDateContext()
-    guard !timezoneRefreshState.shouldDeferStoreReload(for: context.timeZone.identifier) else {
+    guard !sourceNeedsInvalidation,
+      !timezoneRefreshState.shouldDeferStoreReload(for: context.timeZone.identifier)
+    else {
       return
     }
     reloadFromStore(context: context)
@@ -664,6 +711,7 @@ final class AppModel: ObservableObject {
     static let refreshInterval = "refreshInterval"
     static let agentsviewPath = "agentsviewPath"
     static let agentsviewServerURL = "agentsviewServerURL"
+    static let sourceNeedsInvalidation = "usageSourceNeedsInvalidation"
     static let machineLabels = "machineLabels"
     static let maintenanceMode = "maintenanceMode"
     static let lastMaintenanceAt = "lastMaintenanceAt"

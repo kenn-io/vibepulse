@@ -25,14 +25,14 @@ enum UsageSeriesAggregation {
     return samplesByMachine.flatMap { machineName, samples in
       let samplesByDate = Dictionary(grouping: samples) { $0.recordedAt }
       let dates = samplesByDate.keys.sorted()
-      var highWaterByTool: [UsageAgent: Double] = [:]
+      var latestCostByTool: [UsageAgent: Double] = [:]
       var runningTotal = 0.0
 
       return dates.map { date in
         let deltaCost = samplesByDate[date, default: []].reduce(0) { total, sample in
-          let highWater = highWaterByTool[sample.tool] ?? 0
-          highWaterByTool[sample.tool] = max(highWater, sample.totalCost)
-          return total + max(0, sample.totalCost - highWater)
+          let previousCost = latestCostByTool[sample.tool] ?? 0
+          latestCostByTool[sample.tool] = sample.totalCost
+          return total + sample.totalCost - previousCost
         }
         runningTotal += deltaCost
         return UsageSeriesPoint(series: .machine(machineName), date: date, cost: runningTotal)
@@ -90,14 +90,14 @@ enum UsageSeriesAggregation {
     return samplesByModel.flatMap { modelName, samples in
       let samplesByDate = Dictionary(grouping: samples) { $0.recordedAt }
       let dates = samplesByDate.keys.sorted()
-      var highWaterByTool: [UsageAgent: Double] = [:]
+      var latestCostByTool: [UsageAgent: Double] = [:]
       var runningTotal = 0.0
 
       return dates.map { date in
         let deltaCost = samplesByDate[date, default: []].reduce(0) { total, sample in
-          let highWater = highWaterByTool[sample.tool] ?? 0
-          highWaterByTool[sample.tool] = max(highWater, sample.totalCost)
-          return total + max(0, sample.totalCost - highWater)
+          let previousCost = latestCostByTool[sample.tool] ?? 0
+          latestCostByTool[sample.tool] = sample.totalCost
+          return total + sample.totalCost - previousCost
         }
         runningTotal += deltaCost
         return UsageSeriesPoint(series: .model(modelName), date: date, cost: runningTotal)

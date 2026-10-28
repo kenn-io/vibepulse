@@ -110,7 +110,10 @@ final class YearlyHistoryTests: XCTestCase {
       rootView: MenuContentView()
         .environmentObject(model).environmentObject(UpdaterController()))
     view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
+    let window = showMenuWindow(containing: view)
+    defer { window.close() }
     view.layoutSubtreeIfNeeded()
+    await waitForMenuTotal(5, model: model)
     await finishRefresh(model)
 
     XCTAssertEqual(model.toolTotals.reduce(0) { $0 + $1.totalCost }, 5)
@@ -190,6 +193,8 @@ final class YearlyHistoryTests: XCTestCase {
       rootView: MenuContentView()
         .environmentObject(model).environmentObject(UpdaterController()))
     view.frame = NSRect(x: 0, y: 0, width: 360, height: 440)
+    let window = showMenuWindow(containing: view)
+    defer { window.close() }
     view.layoutSubtreeIfNeeded()
     var views: [NSView] = [view]
     var selectedYear = false

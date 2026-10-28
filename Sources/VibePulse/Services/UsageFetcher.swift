@@ -2,7 +2,7 @@ import Foundation
 
 protocol UsageFetching: Sendable {
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent]
-  // Called concurrently for different agents after discovery and machine labels finish.
+  // Called concurrently for different agents after discovery. Server labels may also be in flight.
   func fetchDailyTotals(
     for tool: UsageAgent,
     using context: UsageDateContext
@@ -57,7 +57,8 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
         where Self.isUnsupportedBreakdownError(output)
       {
         data = try executeAgentsviewCommand(
-          tool.dailyCommand(using: context).filter { $0 != "--breakdown" })
+          tool.dailyCommand(using: context).filter { $0 != "--breakdown" },
+          agentsviewPath: context.agentsviewPath)
       }
       let totals = try Self.parseDailyTotals(data: data)
       guard
@@ -91,7 +92,7 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     guard !configuredURL.isEmpty else {
       // The CLI always includes automation, so it cannot answer a filtered request.
       guard context.includeAutomated else { throw FetchError.automationFilterUnsupported }
-      return try executeAgentsviewCommand(command)
+      return try executeAgentsviewCommand(command, agentsviewPath: context.agentsviewPath)
     }
 
     let url = try Self.makeServerURL(
@@ -167,16 +168,18 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     throw FetchError.commandFailed("retry loop exhausted")
   }
 
-  private func executeCommand(_ arguments: [String]) throws -> Data {
+  private func executeCommand(_ arguments: [String], agentsviewPath: String) throws -> Data {
     if let commandRunner {
       return try commandRunner(arguments)
     }
-    return try runCommand(arguments)
+    return try runCommand(arguments, agentsviewPath: agentsviewPath)
   }
 
-  private func executeAgentsviewCommand(_ arguments: [String]) throws -> Data {
+  private func executeAgentsviewCommand(_ arguments: [String], agentsviewPath: String) throws
+    -> Data
+  {
     do {
-      return try executeCommand(arguments)
+      return try executeCommand(arguments, agentsviewPath: agentsviewPath)
     } catch FetchError.commandFailed(let output)
       where Self.isUnsupportedTimezoneError(output)
     {
@@ -214,9 +217,9 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     }
   }
 
-  private func runCommand(_ arguments: [String]) throws -> Data {
+  private func runCommand(_ arguments: [String], agentsviewPath: String) throws -> Data {
     let (executableURL, resolvedArguments) =
-      try resolveCommand(arguments: arguments)
+      try resolveCommand(arguments: arguments, agentsviewPath: agentsviewPath)
     let process = Process()
     process.executableURL = executableURL
     process.arguments = resolvedArguments
@@ -263,16 +266,14 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   }
 
   private func resolveCommand(
-    arguments: [String]
+    arguments: [String], agentsviewPath: String
   ) throws -> (URL, [String]) {
     guard let first = arguments.first, first == "agentsview" else {
       return (URL(fileURLWithPath: "/usr/bin/env"), arguments)
     }
 
-    let override = UserDefaults.standard.string(
-      forKey: "agentsviewPath"
-    )
-    if let override, !override.isEmpty {
+    let override = agentsviewPath
+    if !override.isEmpty {
       if FileManager.default.isExecutableFile(atPath: override) {
         return (
           URL(fileURLWithPath: override),

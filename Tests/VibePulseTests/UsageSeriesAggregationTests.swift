@@ -3,6 +3,30 @@ import XCTest
 @testable import VibePulse
 
 final class UsageSeriesAggregationTests: XCTestCase {
+  func testCumulativeBreakdownsReflectCorrectionsAcrossAgents() {
+    let start = Date(timeIntervalSince1970: 1_000)
+    let costs: [(UsageAgent, Double)] = [
+      (.codex, 10), (.claude, 2), (.codex, 5), (.codex, 6), (.claude, 0),
+    ]
+    let modelSamples = costs.enumerated().map { index, value in
+      ModelUsageSample(
+        tool: value.0, modelName: "shared-model",
+        recordedAt: start.addingTimeInterval(Double(index)), totalCost: value.1, deltaCost: 0)
+    }
+    let machineSamples = costs.enumerated().map { index, value in
+      MachineUsageSample(
+        tool: value.0, machineName: "shared-machine",
+        recordedAt: start.addingTimeInterval(Double(index)), totalCost: value.1, deltaCost: 0)
+    }
+
+    XCTAssertEqual(
+      UsageSeriesAggregation.cumulativeModelSeries(from: modelSamples).map(\.cost),
+      [10, 12, 7, 8, 6])
+    XCTAssertEqual(
+      UsageSeriesAggregation.cumulativeMachineSeries(from: machineSamples).map(\.cost),
+      [10, 12, 7, 8, 6])
+  }
+
   func testCumulativeMachineSeriesCombinesSameMachineAcrossAgents() {
     let calendar = Calendar.current
     let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 16, hour: 10))!
@@ -126,7 +150,7 @@ final class UsageSeriesAggregationTests: XCTestCase {
     XCTAssertEqual(points.map(\.cost), [5, 8])
   }
 
-  func testCumulativeModelSeriesDoesNotDropWhenModelResetsToZero() {
+  func testCumulativeModelSeriesReflectsCorrectionToZero() {
     let calendar = Calendar.current
     let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2, hour: 10))!
     let later = calendar.date(byAdding: .hour, value: 1, to: start)!
@@ -154,7 +178,7 @@ final class UsageSeriesAggregationTests: XCTestCase {
         "claude-haiku-4-5-20251001",
       ])
     XCTAssertEqual(points.map(\.date), [start, later])
-    XCTAssertEqual(points.map(\.cost), [2, 2])
+    XCTAssertEqual(points.map(\.cost), [2, 0])
   }
 
   func testCumulativeModelSeriesDoesNotDoubleCountResetThenReappear() {
@@ -195,6 +219,6 @@ final class UsageSeriesAggregationTests: XCTestCase {
     XCTAssertEqual(
       points.map(\.date),
       [start, reset, reappearSameTotal, reappearHigherTotal])
-    XCTAssertEqual(points.map(\.cost), [2, 2, 2, 5])
+    XCTAssertEqual(points.map(\.cost), [2, 0, 2, 5])
   }
 }

@@ -26,8 +26,9 @@ final class UsageRefreshService: @unchecked Sendable {
       try store.replaceDailyTotals(tool: agent, totals: [], dateContext: context)
       try store.deleteCurrentDaySamples(for: agent, using: context)
     }
-    // Labels are display-only, so a failed request must not block usage.
-    let machineLabels = try? fetcher.fetchMachineLabels(using: context)
+    // CLI labels are already cached by discovery. Server labels refresh independently.
+    let machineLabels =
+      context.serverURL.isEmpty ? try? fetcher.fetchMachineLabels(using: context) : nil
     let reports = agents.map { DailyTotalsFetch(fetcher: fetcher, agent: $0, context: context) }
     let queue = OperationQueue()
     queue.maxConcurrentOperationCount = 2
