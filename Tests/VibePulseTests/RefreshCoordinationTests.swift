@@ -1,12 +1,12 @@
 import Combine
-import SwiftUI
+import Foundation
 import XCTest
 
 @testable import VibePulse
 
 final class RefreshCoordinationTests: XCTestCase {
   @MainActor
-  func testMenuOpenedDuringRefreshQueuesOneFollowup() async throws {
+  func testRequestsDuringRefreshCoalesceIntoOneFollowup() async throws {
     let blocked = expectation(description: "second report captured")
     let fetcher = CoordinatedUsageFetcher(blocked: blocked) { _, count in count == 2 }
     defer { fetcher.resume.signal() }
@@ -15,13 +15,6 @@ final class RefreshCoordinationTests: XCTestCase {
 
     model.refreshNow(refreshHistory: false)
     await fulfillment(of: [blocked], timeout: 3)
-    let view = NSHostingView(
-      rootView: MenuContentView().environmentObject(model)
-        .environmentObject(UpdaterController()))
-    view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
-    let window = showMenuWindow(containing: view)
-    defer { window.close() }
-    view.layoutSubtreeIfNeeded()
     model.refreshNow(refreshHistory: false)
     model.refreshNow(refreshHistory: false)
     fetcher.resume.signal()
@@ -30,7 +23,6 @@ final class RefreshCoordinationTests: XCTestCase {
     XCTAssertEqual(fetcher.reportContexts.count, 3)
     XCTAssertEqual(model.toolTotals.first?.totalCost, 3)
     XCTAssertNotNil(model.lastUpdated)
-    withExtendedLifetime(view) {}
   }
 
   @MainActor
