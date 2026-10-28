@@ -47,7 +47,7 @@ struct MenuContentView: View {
     .background(Color(nsColor: .windowBackgroundColor))
     .onAppear {
       disableWindowResizing()
-      model.refreshIfNeeded()
+      model.refreshNow(refreshHistory: false)
     }
   }
 

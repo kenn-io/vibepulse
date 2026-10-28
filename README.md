@@ -65,10 +65,10 @@ For mise installations, VibePulse automatically checks `~/.local/share/mise/shim
 - **Include automated sessions**: Enabled by default under Data Sources. Turn it off to exclude automated reviews from server reports. Both reports are fetched on every server refresh and cached separately, so changing this setting switches histories without fetching again. This setting is unavailable with the local CLI, which always includes automated sessions.
 - **Startup**: Start VibePulse at login (macOS may require approval).
 - **Dependencies**: Set an `agentsview pg serve` URL, or a custom local `agentsview` path.
-- **Refresh**: Choose how often the app refreshes (5m, 15m, 1h, 4h, 1d). Opening the menu reuses fresh data until that interval expires. The Refresh button always fetches immediately.
+- **Refresh**: Choose how often the app refreshes in the background (5m, 15m, 1h, 4h, 1d). Opening the menu fetches recent usage immediately, including changes from an AgentsView sync. The Refresh button also fetches immediately.
 - **Data Maintenance**: Normalize historical data and rerun import fixes.
 
-Select **1 Year** to import older history and show monthly totals. The first load can take longer than a normal refresh. The app keeps that history locally and reuses the year import for the rest of the day while it is running. Between year imports, scheduled refreshes fetch only 30 days. While viewing the year, a new day or source/timezone change renews the year import, and **Refresh** reloads it immediately.
+Select **1 Year** to import older history and show monthly totals. The first load can take longer than a normal refresh. The app keeps that history locally and reuses the year import for the rest of the day while it is running. Between year imports, opening the menu and scheduled refreshes fetch only 30 days. While viewing the year, a new day or source/timezone change renews the year import, and **Refresh** reloads it immediately.
 
 ## Security & privacy
 
