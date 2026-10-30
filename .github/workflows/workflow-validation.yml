@@ -27,8 +27,10 @@ jobs:
       - name: Verify the workflow action lockfile
         env:
           GH_TOKEN: ${{ github.token }}
-          # Keep in step with constraints.ghActionsLock in renovate.json.
-          GH_ACTIONS_LOCK_VERSION: v0.3.0
+        # Install the gh-actions-lock release that Renovate uses, from
+        # constraints.ghActionsLock in renovate.json.
         run: |
-          gh extension install github/gh-actions-lock --pin "$GH_ACTIONS_LOCK_VERSION"
+          version="$(sed -nE 's/^[[:space:]]*"ghActionsLock":[[:space:]]*"([^"]*)".*/\1/p' renovate.json)"
+          test -n "$version"
+          gh extension install github/gh-actions-lock --pin "$version"
           gh actions-lock --verify
