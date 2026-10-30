@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -102,7 +102,7 @@ jobs:
 
       # Phase 1: Create draft release with DMG + checksums
       - name: Upload to draft GitHub Release
-        uses: step-security/action-gh-release@dc29ef0d1f6f9a032a97ec797d9cb7ea788dde41  # v2.6.1
+        uses: step-security/action-gh-release@44319d37c8b7966bf07f89f0cbf63408141446df  # v3.0.3
         with:
           draft: true
           generate_release_notes: true
