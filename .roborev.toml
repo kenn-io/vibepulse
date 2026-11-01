@@ -1,0 +1,64 @@
+review_guidelines = """
+VibePulse is a single-user macOS 13+ menu bar app (SwiftUI, SwiftPM, no Xcode project) that shows
+token spend from agentsview. It gets usage either by running the local `agentsview usage daily
+--format json` CLI or, when the user sets a server URL in Settings, from an `agentsview pg serve`
+instance's `/api/v1/usage/summary` and `/api/v1/machines` routes. It caches results in two local
+SQLite files under ~/Library/Application Support/VibePulse/ (combined and non-automated usage) and
+updates itself through Sparkle. It has no analytics or telemetry. docs/design/ describes the
+current behavior; check it before calling a documented choice a defect.
+
+Where input comes from:
+- agentsview CLI output and server JSON are external data. The parsers reject empty output,
+  non-finite costs, and invalid calendar date keys. Discovery skips a malformed agent breakdown;
+  daily-total parsing fails the whole report on a malformed row. Both behaviors are intended.
+- The agentsview path and server URL are user settings. A configured path must be an executable
+  file; it is never run through a shell. Without one, the app searches the mise shim directory,
+  ~/.local/bin and the usual system paths.
+- CI release signing material lives in GitHub Actions secrets used only by the tag-triggered
+  release workflow; scripts/release_local.sh uses the releaser's Keychain. The Sparkle public
+  key (SUPublicEDKey in scripts/build_dmg.sh) is public by design; do not flag it as a committed
+  secret.
+
+Invariants to check (docs/design/dynamic-agent-discovery.md):
+- Agents are discovered from agentsview output, not a compiled list. The curated display-name
+  table in UsageAgent is cosmetic; an unknown identifier must still import, store, chart and get a
+  Settings toggle.
+- Disabling an agent affects presentation only. Every discovered agent is still imported, and
+  neither disabling nor leaving the discovery window deletes stored rows or the saved preference.
+- A failed discovery leaves the cached agent list unchanged. A successful empty discovery replaces
+  it.
+- One agent's import failure must not stop the others.
+- VibePulse reads agentsview only through its CLI and HTTP API, never agentsview's SQLite file.
+- Older agentsview builds: the fetcher retries without `--breakdown` and reports a dedicated
+  upgrade error when `--timezone` is rejected. The CLI cannot filter automated sessions, so CLI
+  mode keeps only the combined history.
+- AppModel is @MainActor and coalesces refresh requests. Results from a refresh whose timezone or
+  source configuration changed while it ran must not be published; a source change invalidates
+  both stores. Flag paths that publish stale-context results.
+- Subprocess stdout and stderr must be drained concurrently. Reading one pipe to EOF first
+  deadlocks when agentsview writes more than the pipe buffer, as it does during a full resync.
+- UsageStore.migrate() upgrades existing user databases in place (CREATE TABLE IF NOT EXISTS,
+  ADD COLUMN, PRAGMA user_version). Schema changes must keep that upgrade path.
+
+Release pipeline (docs/design/sparkle-auto-updates.md, .github/workflows/release.yml,
+scripts/release_local.sh):
+- Both release paths create a draft release with the DMG (CI also attaches SHA256SUMS), attach
+  the signed appcast, then publish. Flag any reordering that lets `releases/latest` point at a
+  release missing the DMG or appcast.
+- scripts/build_dmg.sh embeds Sparkle, rewrites and verifies the rpath, then signs nested
+  components inside-out without `--deep`. `--deep` is used only for the final verification.
+- Release-notes rendering falls back to raw markdown and then a fixed string on purpose; it never
+  blocks a release.
+- `swift run` builds have no Info.plist, so the updater is intentionally unavailable there.
+- The single-item appcast limits key rotation; the design doc records this and defers a
+  multi-item feed. Do not report it as a new defect.
+
+CI and tooling:
+- CI runs `swift-format lint` with .swift-format, `swift build` and `swift test`. Do not raise
+  formatting findings the linter covers.
+- Workflows reference actions by release tag. .github/workflows/actions.lock pins each one to a
+  commit, and the workflow-validation job verifies it. Do not flag tag references as unpinned; do
+  flag a workflow change that leaves actions.lock stale.
+- CI does not install agentsview. Tests inject a command runner into UsageFetcher instead; do
+  not ask for tests that need a real agentsview install or network access.
+"""
