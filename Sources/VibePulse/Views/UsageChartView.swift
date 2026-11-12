@@ -8,7 +8,15 @@ struct UsageChartView: View {
   let cumulativeSeries: [UsageSeriesPoint]
   let historySeries: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
-  @Binding var selection: HistorySelection?
+  let machineLabels: [String: String]
+  /// Lowest y, in `menuCoordinateSpace`, that the hover tooltip may reach.
+  var tooltipBottomLimit: CGFloat? = nil
+
+  static let menuCoordinateSpace = "menu"
+
+  @State private var historyHoverDate: Date?
+  /// Horizontal center of the hovered bar, in the chart's coordinates.
+  @State private var historyHoverBarX: CGFloat?
 
   var body: some View {
     Group {
@@ -78,20 +86,18 @@ struct UsageChartView: View {
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
               .position(by: .value("Series", point.series.chartIdentity))
-              .opacity(barOpacity(point))
             } else {
               BarMark(
                 x: .value("Date", point.date, unit: historyUnit, calendar: dateContext.calendar),
                 y: .value("Cost", point.cost)
               )
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
-              .opacity(barOpacity(point))
             }
           }
 
-          if let selection {
+          if let historyHoverDate, !historyHoverPoints.isEmpty {
             RuleMark(
-              x: .value("Date", selection.date, unit: historyUnit, calendar: dateContext.calendar)
+              x: .value("Date", historyHoverDate, unit: historyUnit, calendar: dateContext.calendar)
             )
             .foregroundStyle(.secondary.opacity(0.5))
             .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
@@ -129,21 +135,43 @@ struct UsageChartView: View {
         }
         .chartOverlay { proxy in
           GeometryReader { geo in
-            HoverTrackingView(
-              onMove: { location in
-                updateHistoryHover(location, proxy: proxy, geo: geo)
-              },
-              onClick: { location in
-                toggleHistoryPin(location, proxy: proxy, geo: geo)
-              })
+            HoverTrackingView { location in
+              updateHistoryHover(location, proxy: proxy, geo: geo)
+            }
+          }
+        }
+        .overlay(alignment: .bottomLeading) {
+          GeometryReader { geo in
+            if let historyHoverDate, !historyHoverPoints.isEmpty, let historyHoverBarX {
+              let width = min(HistoryTooltipView.width, geo.size.width)
+              let x = min(max(historyHoverBarX - width / 2, 0), geo.size.width - width)
+              let gap = HistoryTooltipView.caretHeight + 2
+              let top = geo.frame(in: .named(Self.menuCoordinateSpace)).maxY + gap
+              HistoryTooltipView(
+                date: historyHoverDate,
+                isMonthly: mode == .oneYear,
+                points: historyHoverPoints,
+                palette: palette,
+                machineLabels: machineLabels,
+                maxHeight: tooltipBottomLimit.map { $0 - top },
+                caretX: historyHoverBarX - x
+              )
+              .frame(width: width)
+              .offset(x: x, y: geo.size.height + gap)
+              .allowsHitTesting(false)
+            }
           }
         }
         .frame(height: 160)
+        .onChange(of: mode) { _ in
+          historyHoverDate = nil
+          historyHoverBarX = nil
+        }
       }
     }
   }
 
-  private var historyUnit: Calendar.Component { mode.historyUnit }
+  private var historyUnit: Calendar.Component { mode == .oneYear ? .month : .day }
 
   private var historyDomain: ClosedRange<Date> {
     let context = dateContext
@@ -153,45 +181,58 @@ struct UsageChartView: View {
     return start...context.startOfNextDay
   }
 
+  private var historyHoverPoints: [UsageSeriesPoint] {
+    guard let historyHoverDate else { return [] }
+    return historyPoints(at: historyHoverDate)
+  }
+
   func historyPoints(at date: Date) -> [UsageSeriesPoint] {
-    UsageSeriesAggregation.bucketPoints(
-      historySeries, containing: date, unit: historyUnit, calendar: dateContext.calendar)
-  }
-
-  private func barOpacity(_ point: UsageSeriesPoint) -> Double {
-    guard let selection else { return 1 }
-    let isSelected = dateContext.calendar.isDate(
-      point.date, equalTo: selection.date, toGranularity: historyUnit)
-    return isSelected ? 1 : 0.35
-  }
-
-  /// The start of the bar under `location`, or nil when no bar has data there.
-  private func historyBucket(at location: CGPoint, proxy: ChartProxy, geo: GeometryProxy)
-    -> Date?
-  {
-    let plotFrame = geo[proxy.plotAreaFrame]
-    guard plotFrame.contains(location),
-      let date: Date = proxy.value(atX: location.x - plotFrame.origin.x)
-    else { return nil }
-    return historyPoints(at: date).first?.date
+    return
+      historySeries
+      .filter { dateContext.calendar.isDate($0.date, equalTo: date, toGranularity: historyUnit) }
+      .sorted {
+        UsageLegendLayout.isOrdered(($0.series, $0.cost), before: ($1.series, $1.cost))
+      }
   }
 
   private func updateHistoryHover(_ location: CGPoint?, proxy: ChartProxy, geo: GeometryProxy) {
-    if selection?.isPinned == true { return }
-    let bucket = location.flatMap { historyBucket(at: $0, proxy: proxy, geo: geo) }
-    selection = bucket.map { HistorySelection(date: $0, isPinned: false) }
-  }
-
-  private func toggleHistoryPin(_ location: CGPoint, proxy: ChartProxy, geo: GeometryProxy) {
-    guard let bucket = historyBucket(at: location, proxy: proxy, geo: geo) else {
-      selection = nil
+    guard let location else {
+      historyHoverDate = nil
+      historyHoverBarX = nil
       return
     }
-    if let selection, selection.isPinned, selection.date == bucket {
-      self.selection = HistorySelection(date: bucket, isPinned: false)
-    } else {
-      selection = HistorySelection(date: bucket, isPinned: true)
+
+    let plotFrame = geo[proxy.plotAreaFrame]
+    guard plotFrame.contains(location) else {
+      historyHoverDate = nil
+      historyHoverBarX = nil
+      return
     }
+
+    let relativeX = location.x - plotFrame.origin.x
+    guard let date: Date = proxy.value(atX: relativeX) else {
+      historyHoverDate = nil
+      historyHoverBarX = nil
+      return
+    }
+
+    if let point = historyPoints(at: date).first {
+      historyHoverDate = point.date
+      historyHoverBarX = barCenterX(for: point.date, proxy: proxy, plotFrame: plotFrame)
+    } else {
+      historyHoverDate = nil
+      historyHoverBarX = nil
+    }
+  }
+
+  private func barCenterX(for bucketStart: Date, proxy: ChartProxy, plotFrame: CGRect)
+    -> CGFloat?
+  {
+    guard
+      let bucketEnd = dateContext.calendar.date(byAdding: historyUnit, value: 1, to: bucketStart),
+      let x = proxy.position(forX: bucketStart + bucketEnd.timeIntervalSince(bucketStart) / 2)
+    else { return nil }
+    return plotFrame.minX + x
   }
 
   private var chartSeries: [UsageSeriesKey] {
@@ -208,34 +249,147 @@ struct UsageChartView: View {
   }
 }
 
-/// A hovered or clicked bar in the history chart. A pinned selection ignores hover.
-struct HistorySelection: Equatable {
+private struct HistoryTooltipView: View {
   let date: Date
-  let isPinned: Bool
+  let isMonthly: Bool
+  let points: [UsageSeriesPoint]
+  let palette: UsageSeriesPalette
+  let machineLabels: [String: String]
+  let maxHeight: CGFloat?
+  /// Horizontal position of the hovered column, relative to the tooltip's leading edge.
+  let caretX: CGFloat
+
+  static let width: CGFloat = 260
+  static let caretHeight: CGFloat = 6
+  private static let caretWidth: CGFloat = 12
+  private static let cornerRadius: CGFloat = 8
+  private static let defaultMaximumRows = 12
+  private static let rowHeight: CGFloat = 16
+  private static let rowSpacing: CGFloat = 4
+  private static let padding: CGFloat = 8
+
+  // A step lighter than the menu so the tooltip stands apart from the legend under it.
+  private static let background = NSColor(name: nil) { appearance in
+    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      ? NSColor(white: 0.24, alpha: 1) : NSColor(white: 1, alpha: 1)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: Self.rowSpacing) {
+      Text(date, format: isMonthly ? .dateTime.month().year() : .dateTime.month().day())
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .frame(height: Self.rowHeight)
+
+      ForEach(visiblePoints) { point in
+        pointRow(point)
+      }
+
+      if !hiddenPoints.isEmpty {
+        HStack(spacing: 6) {
+          Text("+\(hiddenPoints.count) more")
+            .foregroundColor(.secondary)
+            .padding(.leading, 14)
+          Spacer(minLength: 8)
+          Text(Formatters.currencyString(hiddenPoints.reduce(0) { $0 + $1.cost }))
+            .foregroundColor(.secondary)
+            .fixedSize()
+        }
+        .font(.caption)
+        .frame(height: Self.rowHeight)
+      }
+    }
+    .padding(Self.padding)
+    .background(
+      RoundedRectangle(cornerRadius: Self.cornerRadius)
+        .fill(Color(nsColor: Self.background))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: Self.cornerRadius)
+        .stroke(Color.secondary.opacity(0.2))
+    )
+    .overlay(alignment: .topLeading) {
+      GeometryReader { geo in
+        let inset = Self.cornerRadius + Self.caretWidth / 2
+        let center = min(max(caretX, inset), geo.size.width - inset)
+        ZStack {
+          // The fill covers the border under the caret's base so the two shapes read as one.
+          TooltipCaret(closed: true).fill(Color(nsColor: Self.background))
+          TooltipCaret(closed: false).stroke(Color.secondary.opacity(0.2))
+        }
+        .frame(width: Self.caretWidth, height: Self.caretHeight + 1)
+        .offset(x: center - Self.caretWidth / 2, y: -Self.caretHeight)
+      }
+    }
+    .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
+  }
+
+  /// Series rows that fit below the date, counting a "+N more" row when some are cut.
+  private var maximumRows: Int {
+    guard let maxHeight else { return Self.defaultMaximumRows }
+    let perRow = Self.rowHeight + Self.rowSpacing
+    let available = maxHeight - Self.padding * 2 - Self.rowHeight
+    return max(Int(available / perRow), 2)
+  }
+
+  /// Rows past the limit collapse into one "+N more" row so the tooltip stays inside the menu.
+  private var visiblePoints: ArraySlice<UsageSeriesPoint> {
+    points.count > maximumRows ? points.prefix(maximumRows - 1) : points[...]
+  }
+
+  private var hiddenPoints: ArraySlice<UsageSeriesPoint> {
+    points.dropFirst(visiblePoints.count)
+  }
+
+  private func pointRow(_ point: UsageSeriesPoint) -> some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(palette.color(for: point.series))
+        .frame(width: 8, height: 8)
+      Text(point.series.displayName(machineLabels: machineLabels))
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer(minLength: 8)
+      Text(Formatters.currencyString(point.cost))
+        .fixedSize()
+    }
+    .font(.caption)
+    .frame(height: Self.rowHeight)
+  }
+}
+
+/// An upward-pointing triangle. The open form omits the base so a stroke draws only the sides.
+private struct TooltipCaret: Shape {
+  let closed: Bool
+
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    if closed { path.closeSubpath() }
+    return path
+  }
 }
 
 private struct HoverTrackingView: NSViewRepresentable {
   var onMove: (CGPoint?) -> Void
-  var onClick: (CGPoint) -> Void
 
   func makeNSView(context: Context) -> TrackingView {
     let view = TrackingView()
     view.onMove = onMove
-    view.onClick = onClick
     return view
   }
 
   func updateNSView(_ nsView: TrackingView, context: Context) {
     nsView.onMove = onMove
-    nsView.onClick = onClick
   }
 
   final class TrackingView: NSView {
-    // Match SwiftUI's top-left origin so points line up with the plot frame.
+    // Match SwiftUI's top-left origin so points line up with the chart's plot frame.
     override var isFlipped: Bool { true }
 
     var onMove: ((CGPoint?) -> Void)?
-    var onClick: ((CGPoint) -> Void)?
     private var trackingArea: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -272,12 +426,6 @@ private struct HoverTrackingView: NSViewRepresentable {
 
     override func mouseExited(with event: NSEvent) {
       onMove?(nil)
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func mouseDown(with event: NSEvent) {
-      onClick?(convert(event.locationInWindow, from: nil))
     }
   }
 }
