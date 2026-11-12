@@ -65,6 +65,28 @@ final class YearlyHistoryTests: XCTestCase {
   }
 
   @MainActor
+  func testHoveredMonthListsSeriesByCostLargestFirst() throws {
+    let formatter = ISO8601DateFormatter()
+    let now = try XCTUnwrap(formatter.date(from: "2026-08-22T12:00:00Z"))
+    let context = UsageDateContext(now: now, timeZone: .gmt, includesYear: true)
+    let august = try XCTUnwrap(DateHelper.date(fromKey: "2026-08-03", in: context.timeZone))
+    let monthly = UsageSeriesAggregation.monthlySeries(
+      from: [
+        UsageSeriesPoint(series: .model("Gemini 3.5 Flash"), date: august, cost: 0.03),
+        UsageSeriesPoint(series: .model("claude-fable-5"), date: august, cost: 2657.93),
+        UsageSeriesPoint(series: .model("gpt-5.6-sol"), date: august, cost: 24_000),
+        UsageSeriesPoint(series: .model("claude-opus-5"), date: august, cost: 150.74),
+      ], context: context)
+    let chart = UsageChartView(
+      mode: .oneYear, dateContext: context, cumulativeSeries: [], historySeries: monthly,
+      palette: UsageSeriesPalette(series: monthly.map(\.series)), machineLabels: [:])
+
+    XCTAssertEqual(
+      chart.historyPoints(at: august).map(\.series.displayName),
+      ["gpt-5.6-sol", "claude-fable-5", "claude-opus-5", "Gemini 3.5 Flash"])
+  }
+
+  @MainActor
   func testSelectingYearImportsOlderAgentsAndReusesHistoryDuringRecentRefreshes() async throws {
     let (model, fetcher) = try makeModel()
     await finishRefresh(model)

@@ -6,6 +6,7 @@ struct MenuContentView: View {
   @EnvironmentObject private var updaterController: UpdaterController
   private var chartMode: ChartMode { model.chartMode }
   @State private var aggregationMode: UsageAggregationMode = .agent
+  @State private var menuHeight: CGFloat?
 
   private let legendRowHeight: CGFloat = 28
   private let legendRowSpacing: CGFloat = 8
@@ -28,7 +29,11 @@ struct MenuContentView: View {
         cumulativeSeries: visibleCumulativeSeries,
         historySeries: visibleDailySeries,
         palette: palette,
-        machineLabels: model.machineLabels)
+        machineLabels: model.machineLabels,
+        tooltipBottomLimit: menuHeight.map { $0 - 8 }
+      )
+      // The hover tooltip hangs below the chart, over the legend.
+      .zIndex(1)
 
       totalsBreakdown(palette: palette)
 
@@ -43,6 +48,13 @@ struct MenuContentView: View {
       controls
     }
     .padding(12)
+    .background(
+      GeometryReader { geo in
+        Color.clear.preference(key: MenuHeightKey.self, value: geo.size.height)
+      }
+    )
+    .onPreferenceChange(MenuHeightKey.self) { menuHeight = $0 }
+    .coordinateSpace(name: UsageChartView.menuCoordinateSpace)
     .frame(width: 360)
     .background(Color(nsColor: .windowBackgroundColor))
     .background(MenuWindowObserver { model.refreshNow(refreshHistory: false) })
@@ -287,6 +299,13 @@ struct MenuContentView: View {
       return points.filter { $0.cost > UsageSeriesFilters.minimumVisibleCost }
     }
     return UsageSeriesFilters.visibleDailySeries(selectedDailySeries, mode: chartMode)
+  }
+}
+
+private struct MenuHeightKey: PreferenceKey {
+  static let defaultValue: CGFloat? = nil
+  static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+    value = nextValue() ?? value
   }
 }
 

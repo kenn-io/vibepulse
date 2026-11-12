@@ -26,6 +26,18 @@ final class UsageLegendLayoutTests: XCTestCase {
       ["Alpha", "Zulu"])
   }
 
+  func testSortedTotalsBreaksTiesIgnoringCase() {
+    let totals = [
+      ToolTotal(series: .model("gpt-5-mini"), totalCost: 5),
+      ToolTotal(series: .model("Gemini 3.5 Flash"), totalCost: 5),
+      ToolTotal(series: .model("claude-sonnet-5"), totalCost: 5),
+    ]
+
+    XCTAssertEqual(
+      UsageLegendLayout.sortedTotals(totals).map(\.series.displayName),
+      ["claude-sonnet-5", "Gemini 3.5 Flash", "gpt-5-mini"])
+  }
+
   func testVisibleRowCountUsesTwoColumnsAndCapsAtEightRows() {
     XCTAssertEqual(UsageLegendLayout.visibleRowCount(for: 0), 0)
     XCTAssertEqual(UsageLegendLayout.visibleRowCount(for: 1), 1)
