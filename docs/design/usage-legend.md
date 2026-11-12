@@ -14,14 +14,25 @@ produced, not a stable, meaningful order.
 The legend keeps its existing two-column item appearance. Entries are sorted
 by descending total cost in every chart mode and aggregation mode (today,
 7-day, 30-day; by agent, model, or machine); equal-cost entries break ties
-by display name so the order is deterministic. Up to 16 entries (eight
+by display name, ignoring case, so the order is deterministic. Up to 16 entries (eight
 two-column rows) show without scrolling; a `ScrollView` wraps the grid and
 scroll indicators only appear once there are more than 16 entries, so short
 legends stay compact and large ones scroll within a capped height instead of
 growing forever.
 
-Chart rendering, tooltip ordering, color assignment, totals, and data
-collection are unchanged — only legend ordering and layout are affected.
+## Bar selection in history charts
+
+The 7-day, 30-day, and 1-year charts have no floating tooltip. Hovering a bar
+selects it instead: the other bars dim, a dashed rule marks the selected day or
+month, and the headline total, its subtitle, and the legend switch to that
+bar's per-series totals, sorted the same way as the full-range legend. Long
+breakdowns scroll in the legend, so every series stays reachable and the chart
+stays visible.
+
+Clicking a bar pins the selection, shown by a pin icon after the subtitle, so
+the pointer can leave the chart to scroll the legend. Clicking the pinned bar
+again unpins it, and clicking an empty part of the plot clears it. Changing
+the view or group, or reopening the menu, also clears the selection.
 
 ## Implementation
 
@@ -33,6 +44,10 @@ no SwiftUI dependency, so its rules are unit-testable directly:
 - `visibleRowCount(for itemCount: Int) -> Int` computes the number of
   two-column rows for a given item count, capped at 8 rows (16 items):
   `ceil(min(itemCount, 16) / 2)`.
+
+`UsageSeriesAggregation.bucketPoints` picks the points that share the
+selected bar's day or month, and `UsageSeriesAggregation.totalsBySeries`
+turns them into sorted legend totals.
 
 `MenuContentView` builds the same `ToolTotal` values it always did (via
 `toolBreakdown`), pipes them through `UsageLegendLayout.sortedTotals` before
