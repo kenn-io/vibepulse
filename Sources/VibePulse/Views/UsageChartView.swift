@@ -386,6 +386,9 @@ private struct HoverTrackingView: NSViewRepresentable {
   }
 
   final class TrackingView: NSView {
+    // Match SwiftUI's top-left origin so points line up with the chart's plot frame.
+    override var isFlipped: Bool { true }
+
     var onMove: ((CGPoint?) -> Void)?
     private var trackingArea: NSTrackingArea?
 
