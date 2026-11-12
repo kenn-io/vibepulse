@@ -32,9 +32,6 @@ enum ChartMode: String, CaseIterable, Identifiable {
     }
   }
 
-  /// The calendar unit one history bar covers.
-  var historyUnit: Calendar.Component { self == .oneYear ? .month : .day }
-
   var usesGroupedDailyBars: Bool {
     switch self {
     case .today, .thirtyDays, .oneYear:

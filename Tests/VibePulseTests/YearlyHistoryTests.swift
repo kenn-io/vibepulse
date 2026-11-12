@@ -57,7 +57,7 @@ final class YearlyHistoryTests: XCTestCase {
         ], context: context)
       let chart = UsageChartView(
         mode: .oneYear, dateContext: context, cumulativeSeries: [], historySeries: monthly,
-        palette: UsageSeriesPalette(series: [.agent(.codex)]), selection: .constant(nil))
+        palette: UsageSeriesPalette(series: [.agent(.codex)]), machineLabels: [:])
 
       XCTAssertEqual(chart.historyPoints(at: march.addingTimeInterval(-60)).map(\.cost), [7], zone)
       XCTAssertEqual(chart.historyPoints(at: march.addingTimeInterval(60)).map(\.cost), [11], zone)

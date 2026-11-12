@@ -9,8 +9,7 @@ enum UsageLegendLayout {
       if lhs.totalCost != rhs.totalCost {
         return lhs.totalCost > rhs.totalCost
       }
-      return lhs.series.displayName.localizedStandardCompare(rhs.series.displayName)
-        == .orderedAscending
+      return lhs.series.displayName < rhs.series.displayName
     }
   }
 

@@ -111,26 +111,6 @@ enum UsageSeriesAggregation {
     }
   }
 
-  /// Points whose bar shares the bucket (day or month) that contains `date`.
-  static func bucketPoints(
-    _ points: [UsageSeriesPoint], containing date: Date, unit: Calendar.Component,
-    calendar: Calendar
-  ) -> [UsageSeriesPoint] {
-    points.filter { calendar.isDate($0.date, equalTo: date, toGranularity: unit) }
-  }
-
-  /// Per-series totals for a set of points, largest first.
-  static func totalsBySeries(_ points: [UsageSeriesPoint]) -> [ToolTotal] {
-    var totals: [UsageSeriesKey: Double] = [:]
-    for point in points {
-      totals[point.series, default: 0] += point.cost
-    }
-    return UsageLegendLayout.sortedTotals(
-      totals.compactMap { series, total in
-        total > 0.0001 ? ToolTotal(series: series, totalCost: total) : nil
-      })
-  }
-
   private struct MachineDailyKey: Hashable {
     let dateKey: String
     let machineName: String

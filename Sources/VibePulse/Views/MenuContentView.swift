@@ -6,7 +6,6 @@ struct MenuContentView: View {
   @EnvironmentObject private var updaterController: UpdaterController
   private var chartMode: ChartMode { model.chartMode }
   @State private var aggregationMode: UsageAggregationMode = .agent
-  @State private var historySelection: HistorySelection?
 
   private let legendRowHeight: CGFloat = 28
   private let legendRowSpacing: CGFloat = 8
@@ -29,7 +28,7 @@ struct MenuContentView: View {
         cumulativeSeries: visibleCumulativeSeries,
         historySeries: visibleDailySeries,
         palette: palette,
-        selection: $historySelection)
+        machineLabels: model.machineLabels)
 
       totalsBreakdown(palette: palette)
 
@@ -46,14 +45,7 @@ struct MenuContentView: View {
     .padding(12)
     .frame(width: 360)
     .background(Color(nsColor: .windowBackgroundColor))
-    .background(
-      MenuWindowObserver {
-        historySelection = nil
-        model.refreshNow(refreshHistory: false)
-      }
-    )
-    .onChange(of: chartMode) { _ in historySelection = nil }
-    .onChange(of: aggregationMode) { _ in historySelection = nil }
+    .background(MenuWindowObserver { model.refreshNow(refreshHistory: false) })
   }
 
   private var selectorControls: some View {
@@ -129,15 +121,9 @@ struct MenuContentView: View {
       Text(combinedTotalText)
         .font(.system(size: 28, weight: .semibold, design: .rounded))
         .monospacedDigit()
-      HStack(spacing: 4) {
-        Text(combinedTotalSubtitle)
-        if historySelection?.isPinned == true {
-          Image(systemName: "pin.fill")
-            .accessibilityLabel("Pinned")
-        }
-      }
-      .font(.caption)
-      .foregroundColor(.secondary)
+      Text(combinedTotalSubtitle)
+        .font(.caption)
+        .foregroundColor(.secondary)
     }
   }
 
@@ -209,22 +195,12 @@ struct MenuContentView: View {
       let total = selectedTotals.reduce(0) { $0 + $1.totalCost }
       return Formatters.currencyString(total)
     case .sevenDays, .thirtyDays, .oneYear:
-      let total = historyBreakdownPoints.reduce(0) { $0 + $1.cost }
+      let total = visibleDailySeries.reduce(0) { $0 + $1.cost }
       return Formatters.currencyString(total)
     }
   }
 
   private var combinedTotalSubtitle: String {
-    if let selectedBucket {
-      var format: Date.FormatStyle =
-        chartMode == .oneYear
-        ? .dateTime.month(.abbreviated).year()
-        : .dateTime.weekday(.abbreviated).month(.abbreviated).day()
-      format.calendar = model.chartDateContext.calendar
-      format.timeZone = model.chartDateContext.timeZone
-      let label = selectedBucket.formatted(format)
-      return "\(label) by \(aggregationMode.title.lowercased())"
-    }
     switch chartMode {
     case .today:
       return "Combined today by \(aggregationMode.title.lowercased()) via agentsview"
@@ -243,23 +219,16 @@ struct MenuContentView: View {
     case .today:
       totals = selectedTotals.filter { $0.totalCost > 0.0001 }
     case .sevenDays, .thirtyDays, .oneYear:
-      return UsageSeriesAggregation.totalsBySeries(historyBreakdownPoints)
+      var totalsBySeries: [UsageSeriesKey: Double] = [:]
+      for point in visibleDailySeries {
+        totalsBySeries[point.series, default: 0] += point.cost
+      }
+      totals = totalsBySeries.compactMap { series, total in
+        guard total > 0.0001 else { return nil }
+        return ToolTotal(series: series, totalCost: total)
+      }
     }
     return UsageLegendLayout.sortedTotals(totals)
-  }
-
-  /// The history bar under the pointer or pinned by a click, if any.
-  private var selectedBucket: Date? {
-    guard chartMode != .today else { return nil }
-    return historySelection?.date
-  }
-
-  /// History points behind the headline total and legend: the selected bar, or the whole range.
-  private var historyBreakdownPoints: [UsageSeriesPoint] {
-    guard let selectedBucket else { return visibleDailySeries }
-    return UsageSeriesAggregation.bucketPoints(
-      visibleDailySeries, containing: selectedBucket, unit: chartMode.historyUnit,
-      calendar: model.chartDateContext.calendar)
   }
 
   private var selectedCumulativeSeries: [UsageSeriesPoint] {
