@@ -53,6 +53,8 @@ This installs `agentsview` to `~/.local/bin/agentsview` or `/usr/local/bin/agent
 
 VibePulse runs outside your shell, so if `agentsview` is installed to a non-standard location, set the path in **Settings -> Dependencies**. To read from an AgentsView server instead, set its URL there; for example, `https://archive.example.com`. If the server requires authentication, enter its bearer token in **Server token**. Tokens are stored in your login keychain for the configured server. Clearing the token removes it from the keychain.
 
+Servers that require a token must use HTTPS, except for loopback connections to this computer. Anonymous HTTP connections are also supported.
+
 For mise installations, VibePulse automatically checks `~/.local/share/mise/shims/agentsview` before standalone installations. The shim follows your mise-selected version as it changes. If you set the path manually, enter the absolute path to the shim, expanding `~` to your home directory. The field accepts an executable file path; shell commands such as `mise exec -- agentsview` belong in a terminal.
 
 ## Settings
