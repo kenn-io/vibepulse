@@ -57,9 +57,14 @@ final class AppModel: ObservableObject {
       defaults.set(
         agentsviewServerURL, forKey: DefaultsKey.agentsviewServerURL
       )
-      if agentsviewServerURL != oldValue { sourceConfigurationChanged() }
+      if agentsviewServerURL != oldValue {
+        loadServerToken()
+        sourceConfigurationChanged()
+      }
     }
   }
+  @Published private(set) var agentsviewServerToken = ""
+  @Published private(set) var serverTokenError: String?
   @Published var includeAutomatedSessions: Bool {
     didSet {
       guard includeAutomatedSessions != oldValue else { return }
@@ -83,6 +88,7 @@ final class AppModel: ObservableObject {
   }
 
   private let defaults: UserDefaults
+  private let serverTokens: ServerTokenStoring
   private let agentPreferences: AgentPreferences
   private let settingsWindowController = SettingsWindowController()
   private let welcomeWindowController = WelcomeWindowController()
@@ -108,9 +114,11 @@ final class AppModel: ObservableObject {
     defaults: UserDefaults = .standard,
     store suppliedStore: UsageStore? = nil,
     nonAutomatedStore suppliedNonAutomatedStore: UsageStore? = nil,
+    serverTokens: ServerTokenStoring = KeychainServerTokens(),
     fetcher: UsageFetching = UsageFetcher()
   ) {
     self.defaults = defaults
+    self.serverTokens = serverTokens
     self.fetcher = fetcher
     sourceNeedsInvalidation = defaults.bool(forKey: DefaultsKey.sourceNeedsInvalidation)
     timezoneRefreshState = UsageRefreshTimezoneState(
@@ -137,8 +145,13 @@ final class AppModel: ObservableObject {
 
     agentsviewPath =
       defaults.string(forKey: DefaultsKey.agentsviewPath) ?? ""
-    agentsviewServerURL =
-      defaults.string(forKey: DefaultsKey.agentsviewServerURL) ?? ""
+    let storedServerURL = defaults.string(forKey: DefaultsKey.agentsviewServerURL) ?? ""
+    agentsviewServerURL = storedServerURL
+    do {
+      agentsviewServerToken = try serverTokens.read(server: storedServerURL)
+    } catch {
+      serverTokenError = error.localizedDescription
+    }
     includeAutomatedSessions =
       defaults.object(forKey: DefaultsKey.includeAutomatedSessions) as? Bool ?? true
     machineLabelSnapshot = defaults.data(forKey: DefaultsKey.machineLabels).flatMap {
@@ -247,6 +260,30 @@ final class AppModel: ObservableObject {
     if isRefreshing { refreshNow(refreshHistory: false) }
   }
 
+  private func loadServerToken() {
+    agentsviewServerToken = ""
+    serverTokenError = nil
+    do {
+      agentsviewServerToken = try serverTokens.read(server: agentsviewServerURL)
+    } catch {
+      serverTokenError = error.localizedDescription
+    }
+  }
+
+  func setServerToken(_ token: String) {
+    let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    do {
+      try serverTokens.write(token, server: agentsviewServerURL)
+      serverTokenError = nil
+      if agentsviewServerToken != token {
+        agentsviewServerToken = token
+        sourceConfigurationChanged()
+      }
+    } catch {
+      serverTokenError = error.localizedDescription
+    }
+  }
+
   private func refreshUsage(now: Date, refreshHistory: Bool) async {
     statusMessage = nil
     let sourceGeneration = sourceConfigurationGeneration
@@ -256,6 +293,7 @@ final class AppModel: ObservableObject {
     let context = UsageDateContext(
       now: now, includesYear: includeYear,
       serverURL: agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines),
+      serverToken: agentsviewServerToken,
       agentsviewPath: agentsviewPath)
     let retainedAgents = !includeYear && lastYearRefresh != nil ? discoveredAgents : []
     let previousAgents = discoveredAgents
@@ -302,6 +340,7 @@ final class AppModel: ObservableObject {
       let scopeContext = UsageDateContext(
         now: context.now, timeZone: context.timeZone, includesYear: context.includesYear,
         includeAutomated: includeAutomated, serverURL: context.serverURL,
+        serverToken: context.serverToken,
         agentsviewPath: context.agentsviewPath)
       let report = await Task.detached(priority: .userInitiated) {
         Result { try service.refresh(context: scopeContext, retainedAgents: retainedAgents) }
@@ -373,7 +412,8 @@ final class AppModel: ObservableObject {
       guard self.sourceConfigurationGeneration == sourceGeneration else {
         self.refreshMachineLabels(
           context: UsageDateContext(
-            serverURL: self.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+            serverURL: self.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            serverToken: self.agentsviewServerToken),
           sourceGeneration: self.sourceConfigurationGeneration)
         return
       }

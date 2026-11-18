@@ -304,7 +304,8 @@ final class YearlyHistoryTests: XCTestCase {
     defaults.set("5m", forKey: "refreshInterval")
     let fetcher = HistoryUsageFetcher()
     let model = AppModel(
-      defaults: defaults, store: try UsageStore(path: ":memory:"), fetcher: fetcher)
+      defaults: defaults, store: try UsageStore(path: ":memory:"),
+      serverTokens: MemoryServerTokens(), fetcher: fetcher)
     return (model, fetcher)
   }
 

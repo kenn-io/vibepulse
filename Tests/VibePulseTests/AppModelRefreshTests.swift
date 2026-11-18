@@ -196,7 +196,7 @@ final class AppModelRefreshTests: XCTestCase {
     let excludedStore = try UsageStore(path: ":memory:")
     let model = AppModel(
       defaults: defaults, store: store, nonAutomatedStore: excludedStore,
-      fetcher: AutomatedUsageFetcher())
+      serverTokens: MemoryServerTokens(), fetcher: AutomatedUsageFetcher())
     await finishRefresh(model)
     XCTAssertTrue(model.includeAutomatedSessions)
     XCTAssertEqual(store.dailyTotal(for: UsageDateContext().todayKey, tool: .codex), 100)
@@ -214,7 +214,7 @@ final class AppModelRefreshTests: XCTestCase {
 
     let reopened = AppModel(
       defaults: defaults, store: store, nonAutomatedStore: excludedStore,
-      fetcher: AutomatedUsageFetcher())
+      serverTokens: MemoryServerTokens(), fetcher: AutomatedUsageFetcher())
     await finishRefresh(reopened)
     XCTAssertFalse(reopened.includeAutomatedSessions)
     XCTAssertEqual(reopened.menuTotalText, Formatters.currencyString(10))
@@ -240,7 +240,7 @@ final class AppModelRefreshTests: XCTestCase {
     defer { fetcher.resume.signal() }
     let model = AppModel(
       defaults: defaults, store: combined,
-      nonAutomatedStore: excluded, fetcher: fetcher)
+      nonAutomatedStore: excluded, serverTokens: MemoryServerTokens(), fetcher: fetcher)
     await finishRefresh(model)
     XCTAssertEqual(model.menuTotalText, Formatters.currencyString(10))
 
@@ -296,7 +296,8 @@ final class AppModelRefreshTests: XCTestCase {
       _ = resume.wait(timeout: .now() + 3)
     }
     let model = AppModel(
-      defaults: defaults, store: combined, nonAutomatedStore: excluded, fetcher: fetcher)
+      defaults: defaults, store: combined, nonAutomatedStore: excluded,
+      serverTokens: MemoryServerTokens(), fetcher: fetcher)
 
     await fulfillment(of: [blocked], timeout: 3)
     model.agentsviewServerURL = ""
@@ -325,7 +326,8 @@ final class AppModelRefreshTests: XCTestCase {
       dateContext: UsageDateContext(includesYear: true))
     let fetcher = ScopedUsageFetcher(agents: [.codex, bot])
     let model = AppModel(
-      defaults: defaults, store: combined, nonAutomatedStore: excluded, fetcher: fetcher)
+      defaults: defaults, store: combined, nonAutomatedStore: excluded,
+      serverTokens: MemoryServerTokens(), fetcher: fetcher)
     await finishRefresh(model)
     XCTAssertEqual(model.menuTotalText, Formatters.currencyString(15))
 
@@ -361,7 +363,7 @@ final class AppModelRefreshTests: XCTestCase {
     }
     let model = AppModel(
       defaults: defaults, store: combined, nonAutomatedStore: excluded,
-      fetcher: ScopedUsageFetcher())
+      serverTokens: MemoryServerTokens(), fetcher: ScopedUsageFetcher())
     await finishRefresh(model)
 
     XCTAssertEqual(combined.dailyTotal(for: context.todayKey, tool: .codex), 100)
@@ -388,7 +390,8 @@ final class AppModelRefreshTests: XCTestCase {
       fetcher.setFailing(!includeAutomated)
       let model = AppModel(
         defaults: defaults, store: try UsageStore(path: ":memory:"),
-        nonAutomatedStore: try UsageStore(path: ":memory:"), fetcher: fetcher)
+        nonAutomatedStore: try UsageStore(path: ":memory:"), serverTokens: MemoryServerTokens(),
+        fetcher: fetcher)
       await finishRefresh(model)
 
       XCTAssertEqual(model.discoveredAgents, [.codex])
@@ -430,7 +433,11 @@ final class AppModelRefreshTests: XCTestCase {
     defaults.set("5m", forKey: "refreshInterval")
     let store = try UsageStore(path: ":memory:")
     let fetcher = CountingUsageFetcher()
-    return (AppModel(defaults: defaults, store: store, fetcher: fetcher), fetcher, store)
+    return (
+      AppModel(
+        defaults: defaults, store: store, serverTokens: MemoryServerTokens(), fetcher: fetcher),
+      fetcher, store
+    )
   }
 
   @MainActor
