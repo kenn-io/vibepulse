@@ -107,6 +107,25 @@ struct SettingsView: View {
         }
       }
 
+      if !model.agentsviewServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        settingsRow("Server token", alignment: .top) {
+          VStack(alignment: .leading, spacing: 6) {
+            SecureField(
+              "Optional",
+              text: Binding(
+                get: { model.agentsviewServerToken },
+                set: { model.setServerToken($0) })
+            )
+            .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Server token")
+            helperText("Saved in your login keychain for this server.")
+            if let error = model.serverTokenError {
+              Text(error).font(.caption).foregroundStyle(.red)
+            }
+          }
+        }
+      }
+
       settingsRow("agentsview path", alignment: .top) {
         VStack(alignment: .leading, spacing: 6) {
           HStack(spacing: 8) {

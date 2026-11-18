@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 protocol UsageFetching: Sendable {
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent]
@@ -21,10 +22,15 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
   }
 
   private let commandRunner: (([String]) throws -> Data)?
+  private let requestLoader: (URLRequest) throws -> Data
   private var cliMachineLabels: MachineLabels?
 
-  init(commandRunner: (([String]) throws -> Data)? = nil) {
+  init(
+    commandRunner: (([String]) throws -> Data)? = nil,
+    requestLoader: ((URLRequest) throws -> Data)? = nil
+  ) {
     self.commandRunner = commandRunner
+    self.requestLoader = requestLoader ?? Self.loadRequest
   }
 
   func discoverAgents(using context: UsageDateContext) throws -> [UsageAgent] {
@@ -77,7 +83,8 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
     let serverURL = Self.normalizedServerURL(context.serverURL)
     guard !serverURL.isEmpty else { return cliMachineLabels }
 
-    let data = try Data(contentsOf: Self.makeMachinesURL(configuredURL: serverURL))
+    let data = try serverData(
+      url: Self.makeMachinesURL(configuredURL: serverURL), context: context)
     return MachineLabels(
       serverURL: serverURL,
       labels: try Self.parseMachineLabels(data: data))
@@ -99,7 +106,39 @@ final class UsageFetcher: UsageFetching, @unchecked Sendable {
       configuredURL: configuredURL,
       agent: agent,
       context: context)
-    return try Data(contentsOf: url)
+    return try serverData(url: url, context: context)
+  }
+
+  private func serverData(url: URL, context: UsageDateContext) throws -> Data {
+    var request = URLRequest(url: url)
+    if !context.serverToken.isEmpty {
+      request.setValue("Bearer \(context.serverToken)", forHTTPHeaderField: "Authorization")
+    }
+    return try requestLoader(request)
+  }
+
+  // Refresh workers use a synchronous fetching contract on background threads.
+  private static func loadRequest(_ request: URLRequest) throws -> Data {
+    let result = OSAllocatedUnfairLock<Result<Data, Error>?>(initialState: nil)
+    let finished = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      let value: Result<Data, Error>
+      if let error {
+        value = .failure(error)
+      } else if let response = response as? HTTPURLResponse,
+        !(200..<300).contains(response.statusCode)
+      {
+        value = .failure(FetchError.commandFailed("Server returned HTTP \(response.statusCode)."))
+      } else if let data {
+        value = .success(data)
+      } else {
+        value = .failure(FetchError.invalidOutput)
+      }
+      result.withLock { $0 = value }
+      finished.signal()
+    }.resume()
+    finished.wait()
+    return try result.withLock { try $0!.get() }
   }
 
   static func normalizedServerURL(_ configuredURL: String) -> String {

@@ -208,12 +208,14 @@ final class RefreshCoordinationTests: XCTestCase {
     defaults.set("manual", forKey: "maintenanceMode")
     let store = try UsageStore(path: ":memory:")
     let fetcher = CoordinatedUsageFetcher(failingServerURL: "https://other.example")
-    let model = AppModel(defaults: defaults, store: store, fetcher: fetcher)
+    let model = AppModel(
+      defaults: defaults, store: store, serverTokens: MemoryServerTokens(), fetcher: fetcher)
     await finishRefresh(model)
     XCTAssertEqual(model.toolTotals.first?.totalCost, 1)
     model.agentsviewServerURL = "https://other.example"
 
-    let reopened = AppModel(defaults: defaults, store: store, fetcher: fetcher)
+    let reopened = AppModel(
+      defaults: defaults, store: store, serverTokens: MemoryServerTokens(), fetcher: fetcher)
     XCTAssertTrue(reopened.toolTotals.isEmpty)
     await finishRefresh(reopened)
     XCTAssertTrue(reopened.cumulativeSeries.isEmpty)
@@ -235,7 +237,8 @@ final class RefreshCoordinationTests: XCTestCase {
     defaults.set(includeAutomated, forKey: "includeAutomatedSessions")
     return AppModel(
       defaults: defaults, store: try UsageStore(path: ":memory:"),
-      nonAutomatedStore: try UsageStore(path: ":memory:"), fetcher: fetcher)
+      nonAutomatedStore: try UsageStore(path: ":memory:"), serverTokens: MemoryServerTokens(),
+      fetcher: fetcher)
   }
 
   @MainActor

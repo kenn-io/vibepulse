@@ -51,7 +51,7 @@ curl -fsSL https://agentsview.io/install.sh | bash
 
 This installs `agentsview` to `~/.local/bin/agentsview` or `/usr/local/bin/agentsview`.
 
-VibePulse runs outside your shell, so if `agentsview` is installed to a non-standard location, set the path in **Settings -> Dependencies**. To read from a PostgreSQL-backed `agentsview pg serve` instance instead, set its URL there; for example, `http://127.0.0.1:18080`.
+VibePulse runs outside your shell, so if `agentsview` is installed to a non-standard location, set the path in **Settings -> Dependencies**. To read from an AgentsView server instead, set its URL there; for example, `https://archive.example.com`. If the server requires authentication, enter its bearer token in **Server token**. Tokens are stored in your login keychain for the configured server. Clearing the token removes it from the keychain.
 
 For mise installations, VibePulse automatically checks `~/.local/share/mise/shims/agentsview` before standalone installations. The shim follows your mise-selected version as it changes. If you set the path manually, enter the absolute path to the shim, expanding `~` to your home directory. The field accepts an executable file path; shell commands such as `mise exec -- agentsview` belong in a terminal.
 
@@ -64,7 +64,7 @@ For mise installations, VibePulse automatically checks `~/.local/share/mise/shim
 - **Data Sources**: VibePulse discovers agents with positive-cost usage in the past 30 days, or the past 12 calendar months after selecting **1 Year**. Turning one off hides it from totals and charts without stopping imports or deleting history.
 - **Include automated sessions**: Enabled by default under Data Sources. Turn it off to exclude automated reviews from server reports. Both reports are fetched on every server refresh and cached separately, so changing this setting switches histories without fetching again. This setting is unavailable with the local CLI, which always includes automated sessions.
 - **Startup**: Start VibePulse at login (macOS may require approval).
-- **Dependencies**: Set an `agentsview pg serve` URL, or a custom local `agentsview` path.
+- **Dependencies**: Set an AgentsView server URL and optional token, or a custom local `agentsview` path.
 - **Refresh**: Choose how often the app refreshes in the background (5m, 15m, 1h, 4h, 1d). Opening the menu fetches recent usage immediately, including changes from an AgentsView sync. The Refresh button also fetches immediately.
 - **Data Maintenance**: Normalize historical data and rerun import fixes.
 
