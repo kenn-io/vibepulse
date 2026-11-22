@@ -32,6 +32,8 @@ final class UsageAgentTests: XCTestCase {
   }
 
   func testKnownAndGeneratedDisplayNamesArePresentationOnly() {
+    XCTAssertEqual(UsageAgent.antigravity.displayName, "Antigravity")
+    XCTAssertEqual(UsageAgent.antigravityCLI.displayName, "Antigravity CLI")
     XCTAssertEqual(UsageAgent.claude.displayName, "Claude Code")
     XCTAssertEqual(UsageAgent.omp.displayName, "OhMyPi")
     XCTAssertEqual(UsageAgent.copilot.displayName, "GitHub Copilot")
