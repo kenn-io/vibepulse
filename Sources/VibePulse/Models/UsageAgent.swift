@@ -41,6 +41,8 @@ struct UsageAgent: Hashable, Identifiable, Comparable, Sendable {
     ]
   }
 
+  static let antigravity = UsageAgent("antigravity")
+  static let antigravityCLI = UsageAgent("antigravity-cli")
   static let claude = UsageAgent("claude")
   static let codex = UsageAgent("codex")
   static let pi = UsageAgent("pi")
@@ -59,6 +61,8 @@ struct UsageAgent: Hashable, Identifiable, Comparable, Sendable {
   }
 
   private static let knownDisplayNames = [
+    "antigravity": "Antigravity",
+    "antigravity-cli": "Antigravity CLI",
     "claude": "Claude Code",
     "codex": "Codex",
     "pi": "Pi",
