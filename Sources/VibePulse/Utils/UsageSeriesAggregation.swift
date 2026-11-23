@@ -25,8 +25,11 @@ enum UsageSeriesAggregation {
     from points: [UsageSeriesPoint], days: Int, context: UsageDateContext
   ) -> [UsageSeriesPoint] {
     let calendar = context.calendar
+    // Adding days keeps the wall-clock time, so a today that starts at 01:00 (daylight saving
+    // skipped midnight) would put every earlier day at 01:00 and miss its midnight spend.
     let dayStarts = (0..<days).compactMap {
       calendar.date(byAdding: .day, value: $0 - (days - 1), to: context.startOfToday)
+        .map(calendar.startOfDay(for:))
     }
     guard let windowStart = dayStarts.first else { return [] }
 
