@@ -78,14 +78,15 @@ struct UsageChartView: View {
         EmptyStateView(message: "No usage in this period.")
       } else {
         Chart {
-          ForEach(historySeries) { point in
-            if mode.usesGroupedDailyBars {
-              BarMark(
+          ForEach(historyChartSeries) { point in
+            if mode == .sevenDays {
+              LineMark(
                 x: .value("Date", point.date, unit: historyUnit, calendar: dateContext.calendar),
                 y: .value("Cost", point.cost)
               )
+              .interpolationMethod(.monotone)
+              .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
               .foregroundStyle(by: .value("Series", point.series.chartIdentity))
-              .position(by: .value("Series", point.series.chartIdentity))
             } else {
               BarMark(
                 x: .value("Date", point.date, unit: historyUnit, calendar: dateContext.calendar),
@@ -149,6 +150,7 @@ struct UsageChartView: View {
               let top = geo.frame(in: .named(Self.menuCoordinateSpace)).maxY + gap
               HistoryTooltipView(
                 date: historyHoverDate,
+                isRunningTotal: mode == .sevenDays,
                 isMonthly: mode == .oneYear,
                 points: historyHoverPoints,
                 palette: palette,
@@ -186,9 +188,17 @@ struct UsageChartView: View {
     return historyPoints(at: historyHoverDate)
   }
 
+  /// The 7-day view plots each series' running total so its lines climb like the today chart.
+  private var historyChartSeries: [UsageSeriesPoint] {
+    guard mode == .sevenDays, let days = mode.dailyWindowDays else { return historySeries }
+    return UsageSeriesAggregation.runningDailySeries(
+      from: historySeries, days: days, context: dateContext)
+  }
+
   func historyPoints(at date: Date) -> [UsageSeriesPoint] {
     return
-      historySeries
+      historyChartSeries
+      .filter { $0.cost > UsageSeriesFilters.minimumVisibleCost }
       .filter { dateContext.calendar.isDate($0.date, equalTo: date, toGranularity: historyUnit) }
       .sorted {
         UsageLegendLayout.isOrdered(($0.series, $0.cost), before: ($1.series, $1.cost))
@@ -251,6 +261,7 @@ struct UsageChartView: View {
 
 private struct HistoryTooltipView: View {
   let date: Date
+  let isRunningTotal: Bool
   let isMonthly: Bool
   let points: [UsageSeriesPoint]
   let palette: UsageSeriesPalette
@@ -276,7 +287,7 @@ private struct HistoryTooltipView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: Self.rowSpacing) {
-      Text(date, format: isMonthly ? .dateTime.month().year() : .dateTime.month().day())
+      title
         .font(.caption)
         .foregroundColor(.secondary)
         .frame(height: Self.rowHeight)
@@ -322,6 +333,11 @@ private struct HistoryTooltipView: View {
       }
     }
     .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
+  }
+
+  private var title: Text {
+    let label = Text(date, format: isMonthly ? .dateTime.month().year() : .dateTime.month().day())
+    return isRunningTotal ? Text("Total through ") + label : label
   }
 
   /// Series rows that fit below the date, counting a "+N more" row when some are cut.

@@ -65,6 +65,33 @@ final class YearlyHistoryTests: XCTestCase {
   }
 
   @MainActor
+  func testSevenDayHoverShowsEachSeriesRunningTotalThroughThatDay() throws {
+    let formatter = ISO8601DateFormatter()
+    let now = try XCTUnwrap(formatter.date(from: "2026-11-23T15:00:00Z"))
+    let context = UsageDateContext(now: now, timeZone: .gmt)
+    func day(_ key: String) throws -> Date {
+      try XCTUnwrap(DateHelper.date(fromKey: key, in: context.timeZone))
+    }
+    let daily = [
+      UsageSeriesPoint(series: .model("opus"), date: try day("2026-11-18"), cost: 4),
+      UsageSeriesPoint(series: .model("opus"), date: try day("2026-11-20"), cost: 6),
+      UsageSeriesPoint(series: .model("haiku"), date: try day("2026-11-20"), cost: 2),
+      UsageSeriesPoint(series: .model("haiku"), date: try day("2026-11-22"), cost: 9),
+    ]
+    let chart = UsageChartView(
+      mode: .sevenDays, dateContext: context, cumulativeSeries: [], historySeries: daily,
+      palette: UsageSeriesPalette(series: daily.map(\.series)), machineLabels: [:])
+
+    // Series with nothing spent yet stay out of the tooltip.
+    XCTAssertEqual(chart.historyPoints(at: try day("2026-11-19")).map(\.cost), [4])
+    XCTAssertEqual(
+      chart.historyPoints(at: try day("2026-11-22").addingTimeInterval(3600)).map {
+        "\($0.series.displayName)=\($0.cost)"
+      },
+      ["haiku=11.0", "opus=10.0"])
+  }
+
+  @MainActor
   func testHoveredMonthListsSeriesByCostLargestFirst() throws {
     let formatter = ISO8601DateFormatter()
     let now = try XCTUnwrap(formatter.date(from: "2026-08-22T12:00:00Z"))

@@ -31,15 +31,6 @@ enum ChartMode: String, CaseIterable, Identifiable {
       return 30
     }
   }
-
-  var usesGroupedDailyBars: Bool {
-    switch self {
-    case .today, .thirtyDays, .oneYear:
-      return false
-    case .sevenDays:
-      return true
-    }
-  }
 }
 
 enum UsageAggregationMode: String, CaseIterable, Identifiable {

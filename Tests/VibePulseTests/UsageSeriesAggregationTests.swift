@@ -3,6 +3,53 @@ import XCTest
 @testable import VibePulse
 
 final class UsageSeriesAggregationTests: XCTestCase {
+  func testRunningDailySeriesFillsEveryDayAndEndsAtTheWindowTotal() throws {
+    let formatter = ISO8601DateFormatter()
+    let now = try XCTUnwrap(formatter.date(from: "2026-11-23T15:00:00Z"))
+    let context = UsageDateContext(now: now, timeZone: TimeZone(identifier: "America/New_York")!)
+    func day(_ key: String) throws -> Date {
+      try XCTUnwrap(DateHelper.date(fromKey: key, in: context.timeZone))
+    }
+    let daily = [
+      UsageSeriesPoint(series: .model("opus"), date: try day("2026-11-17"), cost: 4),
+      UsageSeriesPoint(series: .model("opus"), date: try day("2026-11-20"), cost: 6),
+      UsageSeriesPoint(series: .model("opus"), date: try day("2026-11-23"), cost: 1),
+      UsageSeriesPoint(series: .model("haiku"), date: try day("2026-11-21"), cost: 2),
+      // Outside the 7-day window, so it must not count toward the running total.
+      UsageSeriesPoint(series: .model("haiku"), date: try day("2026-11-16"), cost: 100),
+    ]
+
+    let running = UsageSeriesAggregation.runningDailySeries(
+      from: daily, days: 7, context: context)
+
+    let days = try ["17", "18", "19", "20", "21", "22", "23"].map { try day("2026-11-\($0)") }
+    let opus = running.filter { $0.series == .model("opus") }
+    XCTAssertEqual(opus.map(\.date), days)
+    XCTAssertEqual(opus.map(\.cost), [4, 4, 4, 10, 10, 10, 11])
+    let haiku = running.filter { $0.series == .model("haiku") }
+    XCTAssertEqual(haiku.map(\.date), days)
+    XCTAssertEqual(haiku.map(\.cost), [0, 0, 0, 0, 2, 2, 2])
+  }
+
+  func testRunningDailySeriesKeepsMidnightSpendWhenDaylightSavingSkipsMidnightToday() throws {
+    // Chile moves its clocks from 00:00 to 01:00 on 2026-09-06, so that day starts at 01:00.
+    let zone = try XCTUnwrap(TimeZone(identifier: "America/Santiago"))
+    let formatter = ISO8601DateFormatter()
+    let now = try XCTUnwrap(formatter.date(from: "2026-09-06T16:00:00Z"))
+    let context = UsageDateContext(now: now, timeZone: zone)
+    let earlierDays = try ["2026-08-31", "2026-09-03"].map { key in
+      try XCTUnwrap(DateHelper.date(fromKey: key, in: zone))
+    }
+    let daily = (earlierDays + [context.startOfToday]).map {
+      UsageSeriesPoint(series: .model("opus"), date: $0, cost: 1)
+    }
+
+    let running = UsageSeriesAggregation.runningDailySeries(
+      from: daily, days: 7, context: context)
+
+    XCTAssertEqual(running.map(\.cost), [1, 1, 1, 2, 2, 2, 3])
+  }
+
   func testCumulativeBreakdownsReflectCorrectionsAcrossAgents() {
     let start = Date(timeIntervalSince1970: 1_000)
     let costs: [(UsageAgent, Double)] = [
