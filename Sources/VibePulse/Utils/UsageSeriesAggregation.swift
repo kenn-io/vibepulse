@@ -19,6 +19,32 @@ enum UsageSeriesAggregation {
     }
   }
 
+  /// Each series' running total at every day of the last `days` days, zero-filled before its
+  /// first spend, so a line per series climbs to that series' total for the window.
+  static func runningDailySeries(
+    from points: [UsageSeriesPoint], days: Int, context: UsageDateContext
+  ) -> [UsageSeriesPoint] {
+    let calendar = context.calendar
+    let dayStarts = (0..<days).compactMap {
+      calendar.date(byAdding: .day, value: $0 - (days - 1), to: context.startOfToday)
+    }
+    guard let windowStart = dayStarts.first else { return [] }
+
+    var costByDay: [UsageSeriesKey: [Date: Double]] = [:]
+    for point in points where point.date >= windowStart && point.date < context.startOfNextDay {
+      costByDay[point.series, default: [:]][calendar.startOfDay(for: point.date), default: 0] +=
+        point.cost
+    }
+
+    return costByDay.keys.sorted { $0.sortKey < $1.sortKey }.flatMap { series in
+      var runningTotal = 0.0
+      return dayStarts.map { day in
+        runningTotal += costByDay[series]?[day] ?? 0
+        return UsageSeriesPoint(series: series, date: day, cost: runningTotal)
+      }
+    }
+  }
+
   static func cumulativeMachineSeries(from samples: [MachineUsageSample]) -> [UsageSeriesPoint] {
     let samplesByMachine = Dictionary(grouping: samples) { $0.machineName }
 

@@ -17,10 +17,4 @@ final class ChartModeTests: XCTestCase {
     XCTAssertEqual(ChartMode.sevenDays.dailyWindowDays, 7)
     XCTAssertEqual(ChartMode.thirtyDays.dailyWindowDays, 30)
   }
-
-  func testSevenDayViewUsesGroupedDailyBars() {
-    XCTAssertFalse(ChartMode.today.usesGroupedDailyBars)
-    XCTAssertTrue(ChartMode.sevenDays.usesGroupedDailyBars)
-    XCTAssertFalse(ChartMode.thirtyDays.usesGroupedDailyBars)
-  }
 }

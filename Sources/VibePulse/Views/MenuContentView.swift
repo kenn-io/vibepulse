@@ -19,7 +19,7 @@ struct MenuContentView: View {
       totalSection
       selectorControls
 
-      Text(chartMode == .today ? "Cumulative" : (chartMode == .oneYear ? "By Month" : "By Day"))
+      Text(chartCaption)
         .font(.caption)
         .foregroundColor(.secondary)
 
@@ -199,6 +199,17 @@ struct MenuContentView: View {
     }
     .buttonStyle(.borderless)
     .font(.caption)
+  }
+
+  private var chartCaption: String {
+    switch chartMode {
+    case .today, .sevenDays:
+      return "Cumulative"
+    case .thirtyDays:
+      return "By Day"
+    case .oneYear:
+      return "By Month"
+    }
   }
 
   private var combinedTotalText: String {
